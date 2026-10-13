@@ -167,7 +167,7 @@ Re-read Meta's WhatsApp Business Solution Terms every quarter. If they tighten a
 | Command | What it does |
 |---|---|
 | `uninstall.cmd` (same as `npm run uninstall`) | Stops the service and removes the scheduled tasks. Clears the webhook override; the app stays subscribed, so whatsapp-mcp keeps working. Deletes the `wa-operator:*` secrets. Keeps `.env` and `data/`, so `install.cmd` brings everything back. |
-| `uninstall.cmd --purge` | Also deletes `.env`, `data/` (PIN, history, tool tiers), `logs/`, `dist/` and `node_modules`. After that you can delete the folder. |
+| `uninstall.cmd --purge` | Also deletes `data/` (PIN, history, tool tiers), `logs/`, `dist/` and `node_modules`. `.env` is never deleted. |
 | `--keep-secrets` | Keeps the secrets, so a reinstall is quick. |
 | `--yes` | Runs without asking. |
 

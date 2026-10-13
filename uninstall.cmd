@@ -1,5 +1,5 @@
 @echo off
-rem One-click uninstall. Arguments: --purge (also delete .env, data, logs, dist, node_modules), --yes, --keep-secrets
+rem One-click uninstall. Arguments: --purge (also delete data, logs, dist, node_modules), --yes, --keep-secrets
 setlocal
 cd /d "%~dp0"
 if not exist node_modules (

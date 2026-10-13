@@ -2,7 +2,7 @@
 /**
  * Undo `npm run setup`.
  *   npm run uninstall                 stop the service, remove tasks, webhook override and secrets (keeps .env and data)
- *   npm run uninstall -- --purge      also delete .env, data/, logs/ and dist/ (uninstall.cmd also removes node_modules)
+ *   npm run uninstall -- --purge      also delete data/, logs/ and dist/ (.env is never deleted) (uninstall.cmd also removes node_modules)
  *   npm run uninstall -- --yes        no questions
  *   npm run uninstall -- --keep-secrets   leave the Credential Manager entries (for a reinstall)
  */
@@ -100,7 +100,7 @@ function removeSecrets(): void {
 
 function purgeFiles(): void {
   log.step('Delete local files');
-  for (const p of ['.env', 'data', 'logs', 'dist']) {
+  for (const p of ['data', 'logs', 'dist']) {
     const full = path.join(ROOT, p);
     if (!fs.existsSync(full)) continue;
     try {
@@ -118,7 +118,7 @@ async function main(): Promise<void> {
     return;
   }
   console.log(`WhatsApp Operator Mode uninstall (${ROOT})`);
-  if (purge) console.log('  --purge: .env, data (PIN, history, tool tiers), logs and dist will be deleted.');
+  if (purge) console.log('  --purge: data (PIN, history, tool tiers), logs and dist will be deleted. .env is kept.');
   if (!(await ask('Continue?', true))) return;
 
   const env = fs.existsSync(ENV_PATH) ? parseDotenv(fs.readFileSync(ENV_PATH)) : {};
@@ -134,7 +134,7 @@ async function main(): Promise<void> {
   console.log('  - Sleep settings: powercfg /change standby-timeout-ac 30');
   console.log('  - Autologon: run Autologon64.exe from Sysinternals and click Disable');
   console.log('  - Meta: the PIN Flow and the reply template stay in WhatsApp Manager');
-  if (!purge) console.log('  - .env and data/ kept. Reinstall with: npm run setup');
+  console.log(`  - .env kept${purge ? '' : ' with data/'}. Reinstall with: install.cmd`);
 }
 
 main().catch((e: unknown) => {
