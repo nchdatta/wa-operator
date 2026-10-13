@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import path from 'node:path';
 import { and, eq, gt } from 'drizzle-orm';
 import { audit } from '../audit.js';
 import type { OwnerChat } from '../channels/owner-chat.js';
@@ -111,6 +112,81 @@ export function renderAction(toolName: string, input: Record<string, unknown>): 
   return `${toolName}\n${s(input, 600)}`;
 }
 
+/** Words only, never code: the card the owner reads on the phone. The exact input stays in renderAction (audit). */
+export function plainAction(toolName: string, input: Record<string, unknown>): string {
+  const str = (v: unknown) => (typeof v === 'string' ? v : '');
+  const file = (v: unknown) => path.basename(str(v)) || 'a file';
+  const site = (v: unknown) => {
+    try {
+      return new URL(str(v)).hostname.replace(/^www\./, '');
+    } catch {
+      return 'a web page';
+    }
+  };
+  const human = (t: string) =>
+    t
+      .replace(/^browser_/, '')
+      .replace(/[_-]+/g, ' ')
+      .trim();
+  switch (toolName) {
+    case 'Bash':
+    case 'PowerShell': {
+      const prog = path.basename(str(input.command).trim().split(/\s+/)[0] ?? '').replace(/\.(exe|cmd|bat|ps1)$/i, '');
+      const what = str(input.description);
+      return what
+        ? `Run a command on the PC: ${truncate(what, 200)}`
+        : `Run a command on the PC${prog ? ` (${prog})` : ''}`;
+    }
+    case 'Write':
+      return `Create or overwrite the file "${file(input.file_path)}"`;
+    case 'Edit':
+    case 'MultiEdit':
+    case 'NotebookEdit':
+      return `Change the file "${file(input.file_path ?? input.notebook_path)}"`;
+    case 'WebFetch':
+      return `Open ${site(input.url)}`;
+    case 'Read':
+    case 'Glob':
+    case 'Grep':
+    case 'LS':
+      return `Look at "${file(input.file_path ?? input.path)}"`;
+  }
+  if (!toolName.startsWith('mcp__')) return `Use ${human(toolName)}`;
+  const [, rawServer, ...rest] = toolName.split('__');
+  const server = (rawServer ?? '').replace(/^claude_ai_/, '').replace(/_/g, ' ');
+  const tool = rest.join('__');
+  const t = tool.toLowerCase();
+  if (/^browser_|computer|playwright|chrome/.test(t) || /browser|chrome|playwright/i.test(server)) {
+    if (/evaluate|javascript|script|run_code/.test(t)) return 'Read information from the open web page in the browser';
+    if (/navigate|goto|open/.test(t)) return `Open ${site(input.url)} in the browser`;
+    if (/click/.test(t))
+      return `Click${str(input.element) ? ` "${truncate(str(input.element), 80)}"` : ' something'} in the browser`;
+    if (/type|fill|form/.test(t))
+      return `Type text into${str(input.element) ? ` "${truncate(str(input.element), 80)}"` : ' a field'} in the browser`;
+    if (/upload/.test(t)) return 'Upload a file in the browser';
+    if (/download/.test(t)) return 'Download a file in the browser';
+    if (/screenshot|snapshot/.test(t)) return 'Look at the browser screen';
+    if (/tab/.test(t)) return 'Switch or open a browser tab';
+    return `Use the browser (${human(tool)})`;
+  }
+  const to = str(input.to) || str(input.recipient);
+  const subject = str(input.subject) || str(input.title);
+  const lines = [`${server}: ${human(tool)}`];
+  if (to) lines.push(`To: ${truncate(to, 120)}`);
+  if (subject) lines.push(`Subject: ${truncate(subject, 150)}`);
+  const body = str(input.body) || str(input.text) || str(input.message);
+  if (body && !/[{};]|=>|function\s*\(/.test(body)) lines.push(`"${truncate(body, 300)}"`);
+  return lines.join('\n');
+}
+
+/** Tier reasons in plain words. */
+export function plainReason(reason: string): string {
+  if (/^new tool /.test(reason)) return 'Claude has not used this before';
+  if (/^unknown tool/.test(reason)) return 'Claude has not used this before';
+  if (/^browser /.test(reason)) return 'it acts in the browser';
+  return reason.replace(/\(.*?wa-operator.*?\)/g, '').trim();
+}
+
 const HEADERS: Record<ApprovalTier, string> = {
   MEDIUM: '🟦 OK to do this?',
   HIGH: '🟧 Approve this action?',
@@ -176,7 +252,7 @@ export class ApprovalEngine {
 
     const outcome = new Promise<ApprovalOutcome>((resolve) => this.waiters.set(id, { resolve }));
     try {
-      await this.sendCard(id, req, preview);
+      await this.sendCard(id, req);
     } catch (e) {
       this.finish(id, 'expired');
       this.waiters.delete(id);
@@ -197,9 +273,9 @@ export class ApprovalEngine {
     return result;
   }
 
-  private async sendCard(id: string, req: ApprovalRequest, preview: string): Promise<void> {
+  private async sendCard(id: string, req: ApprovalRequest): Promise<void> {
     const minutes = Math.round(this.ttlMs / 60_000);
-    const body = `${HEADERS[req.tier]}\n\n${preview}\n\nWhy: ${req.reason}`;
+    const body = `${HEADERS[req.tier]}\n\n${plainAction(req.toolName, req.input)}\n\nWhy: ${plainReason(req.reason)}`;
     const footer = `Expires in ${minutes} min · ${id.slice(-6)}`;
     let cardId: string | null;
     if (req.tier === 'CRITICAL') {
