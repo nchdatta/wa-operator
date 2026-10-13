@@ -175,3 +175,14 @@ Not undone, change these by hand if needed:
 - Sleep settings: `powercfg /change standby-timeout-ac 30`
 - Autologon: open Sysinternals Autologon and click Disable
 - The PIN Flow and the template stay in WhatsApp Manager
+
+## Day-to-day commands
+
+| Command | What it does |
+|---|---|
+| `npm run svc:start` | Start the background service (logon task) |
+| `npm run svc:stop` | Stop it |
+| `npm run svc:restart` | Restart it (after changing `.env` or `config/mcp.json`) |
+| `npm run svc:status` | Task state and health check |
+| `npm run svc:logs` | Follow the log |
+| `npm run doctor` | Check login, service, tunnel, webhook, MCP servers, PIN |
