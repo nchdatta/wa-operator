@@ -2,6 +2,7 @@
 import { spawnSync } from 'node:child_process';
 import type { Server } from 'node:http';
 import { createOperatorApp } from '../app.js';
+import { BaileysChannel } from '../channels/baileys.js';
 import type { Channel } from '../channels/channel.js';
 import { TelegramChannel, TelegramPoller } from '../channels/telegram.js';
 import { WhatsAppChannel } from '../channels/whatsapp.js';
@@ -61,6 +62,10 @@ async function main(): Promise<void> {
     markRead = (id) => wa.markRead(id);
     if (!config.OPERATOR_PIN_FLOW_ID)
       logger.warn('OPERATOR_PIN_FLOW_ID is not set: the PIN cannot be requested. See docs/setup.md.');
+  } else if (config.CHANNEL === 'baileys') {
+    const bl = new BaileysChannel(config, logger);
+    channel = bl;
+    markRead = (id) => bl.markRead(id);
   } else {
     channel = new TelegramChannel(config, logger);
   }
@@ -94,6 +99,16 @@ async function main(): Promise<void> {
     ),
   );
 
+  if (channel instanceof BaileysChannel) {
+    const bl = channel;
+    bl.onMessage = (m) => {
+      if (storeJob(ctx, 'baileys_message', `bl:${m.key.id}`, BaileysChannel.serialize(m))) app.processor.wake();
+    };
+    void bl.connect({
+      onQr: () => logger.error('Baileys is not linked. Stop the service and run: wa-operator baileys link'),
+    });
+  }
+
   await app.start();
   await tunnel?.start();
   void poller?.run();
@@ -101,6 +116,7 @@ async function main(): Promise<void> {
   const shutdown = async (sig: string) => {
     logger.info({ sig }, 'shutting down');
     poller?.stop();
+    if (channel instanceof BaileysChannel) channel.stop();
     tunnel?.stop();
     server.close();
     await app.stop();

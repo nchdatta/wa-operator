@@ -3,6 +3,7 @@ import { ApprovalEngine } from './approvals/engine.js';
 import type { Channel } from './channels/channel.js';
 import { OwnerChat } from './channels/owner-chat.js';
 import { parseWhatsAppWebhook } from './channels/whatsapp.js';
+import type { BaileysChannel } from './channels/baileys.js';
 import type { TelegramChannel, TgUpdate } from './channels/telegram.js';
 import type { AppContext } from './context.js';
 import { Inbound } from './inbound.js';
@@ -29,7 +30,7 @@ export interface OperatorApp {
   stop(): Promise<void>;
 }
 
-/** Wire every part together. The channel decides WhatsApp vs Telegram; nothing else does. */
+/** Wire every part together. The channel decides WhatsApp, Telegram or Baileys; nothing else does. */
 export function createOperatorApp(
   ctx: AppContext,
   channel: Channel,
@@ -42,7 +43,7 @@ export function createOperatorApp(
   const questions = new OwnerQuestions(ctx.config.OPERATOR_APPROVAL_TTL_SECONDS * 1000);
   const session = new OperatorSession(ctx, chat, gate, approvals, governor, questions);
   const runs = new RunQueue(ctx, chat, gate, session, governor);
-  const operatorId = channel.name === 'whatsapp' ? ctx.config.OPERATOR_WA_ID! : ctx.config.TELEGRAM_OPERATOR_USER_ID!;
+  const operatorId = channel.name === 'telegram' ? ctx.config.TELEGRAM_OPERATOR_USER_ID! : ctx.config.OPERATOR_WA_ID!;
   const inbound = new Inbound({
     ctx,
     chat,
@@ -63,6 +64,10 @@ export function createOperatorApp(
     },
     telegram_update: async (payload) => {
       const m = await (channel as TelegramChannel).normalize(JSON.parse(payload) as TgUpdate);
+      if (m) await inbound.handle(m);
+    },
+    baileys_message: async (payload) => {
+      const m = (channel as BaileysChannel).normalize(payload);
       if (m) await inbound.handle(m);
     },
   });

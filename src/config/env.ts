@@ -21,7 +21,7 @@ const digits = z.string().regex(/^\d+$/, 'must be numeric');
 const EnvSchema = z
   .object({
     /** Which chat app the owner uses. Telegram is the one-setting fallback if Meta's AI policy tightens. */
-    CHANNEL: z.enum(['whatsapp', 'telegram']).default('whatsapp'),
+    CHANNEL: z.enum(['whatsapp', 'telegram', 'baileys']).default('whatsapp'),
 
     // The one user
     /** The owner's personal WhatsApp number (wa_id: country code + number, digits only). */
@@ -103,6 +103,10 @@ const EnvSchema = z
     TELEGRAM_OPERATOR_USER_ID: digits.optional(),
     TELEGRAM_API_BASE_URL: z.url().default('https://api.telegram.org'),
 
+    // Baileys (WhatsApp linked device; unofficial, use a spare number)
+    /** Where the linked-device session is kept. Defaults to <DATA_DIR>/baileys-auth. Treat it like a password. */
+    BAILEYS_AUTH_DIR: z.string().optional(),
+
     // Storage and service
     DATA_DIR: z.string().default('./data'),
     MEDIA_MAX_BYTES: int(1, 100 * 1024 * 1024).default(25 * 1024 * 1024),
@@ -122,6 +126,8 @@ const EnvSchema = z
         ['OPERATOR_WA_ID', 'META_APP_SECRET', 'META_VERIFY_TOKEN', 'WHATSAPP_ACCESS_TOKEN', 'WHATSAPP_PHONE_NUMBER_ID'],
         'when CHANNEL=whatsapp',
       );
+    } else if (v.CHANNEL === 'baileys') {
+      need(['OPERATOR_WA_ID'], 'when CHANNEL=baileys');
     } else {
       need(['TELEGRAM_BOT_TOKEN', 'TELEGRAM_OPERATOR_USER_ID'], 'when CHANNEL=telegram');
     }

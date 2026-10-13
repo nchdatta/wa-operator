@@ -7,6 +7,7 @@ import { Command } from 'commander';
 import { parse as parseDotenv } from 'dotenv';
 import { eq } from 'drizzle-orm';
 import { recentAudit } from '../audit.js';
+import { BaileysChannel, baileysAuthDir } from '../channels/baileys.js';
 import { appRoot, ConfigError, expandPath, loadConfig, type Config } from '../config/env.js';
 import type { AppContext } from '../context.js';
 import { MetaClient } from '../meta/client.js';
@@ -285,6 +286,9 @@ program
       console.log(
         `${config.OPERATOR_REPLY_TEMPLATE ? '✔' : '!'} 24-hour template ${config.OPERATOR_REPLY_TEMPLATE ?? 'not set (results after 24 h are held)'}`,
       );
+    } else if (config.CHANNEL === 'baileys') {
+      const linked = fs.existsSync(path.join(baileysAuthDir(config), 'creds.json'));
+      console.log(`${linked ? '✔' : '✘'} Baileys ${linked ? 'linked' : 'not linked (wa-operator baileys link)'}`);
     } else {
       const res = await fetch(`${config.TELEGRAM_API_BASE_URL}/bot${config.TELEGRAM_BOT_TOKEN}/getMe`);
       const body = (await res.json()) as { ok: boolean; result?: { username?: string } };
@@ -383,6 +387,11 @@ program
       );
     }
 
+    if (c.CHANNEL === 'baileys') {
+      const linked = fs.existsSync(path.join(baileysAuthDir(c), 'creds.json'));
+      line(linked, linked ? 'Baileys linked device' : 'Baileys not linked (wa-operator baileys link)');
+    }
+
     const { servers, skipped } = loadImportedMcp({ config: c } as AppContext);
     line(true, `MCP servers from Claude Desktop / config: ${Object.keys(servers).join(', ') || 'none'}`);
     for (const s of skipped) line('warn', `MCP server skipped: ${s}. Fix the path in Claude Desktop's settings.`);
@@ -397,6 +406,39 @@ program
     );
     console.log(bad ? `\n${bad} problem(s) found.` : '\nAll good.');
     if (bad) process.exitCode = 1;
+  });
+
+program
+  .command('baileys')
+  .description('Baileys (linked device) commands.')
+  .command('link')
+  .description(
+    'Link the Operator WhatsApp number as a linked device (QR code, or --pair for a code). Stop the service first.',
+  )
+  .option('--pair <number>', 'link by 8-character code instead of QR (the bot number, digits only)')
+  .option('--reset', 'forget the current link first')
+  .action(async (o: { pair?: string; reset?: boolean }) => {
+    const config = loadConfig();
+    const dir = baileysAuthDir(config);
+    if (o.reset) fs.rmSync(dir, { recursive: true, force: true });
+    if (fs.existsSync(path.join(dir, 'creds.json'))) {
+      console.log(`✔ Already linked (${dir}). Use --reset to link again.`);
+      return;
+    }
+    const QRCode = (await import('qrcode')).default;
+    const ch = new BaileysChannel(config, silentLogger);
+    const pairPhone = o.pair?.replace(/D/g, '');
+    console.log('On the Operator phone: WhatsApp → Settings → Linked devices → Link a device.');
+    await ch.connect({
+      ...(pairPhone ? { pairPhone } : {}),
+      onQr: (qr) => void QRCode.toString(qr, { type: 'terminal', small: true }).then((s) => console.log(s)),
+      onPairingCode: (code) => console.log(`Pairing code: ${code}  (tap "Link with phone number instead")`),
+    });
+    // Let the first creds sync finish before closing.
+    await new Promise((r) => setTimeout(r, 5000));
+    ch.stop();
+    console.log(`✔ Linked. Session saved in ${dir} (keep it private). Start the service: npm start`);
+    process.exit(0);
   });
 
 program.parseAsync().catch((e: unknown) => {

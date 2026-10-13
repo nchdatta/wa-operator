@@ -5,7 +5,7 @@ export const jobs = sqliteTable(
   'jobs',
   {
     id: text('id').primaryKey(),
-    kind: text('kind', { enum: ['whatsapp_webhook', 'telegram_update'] }).notNull(),
+    kind: text('kind', { enum: ['whatsapp_webhook', 'telegram_update', 'baileys_message'] }).notNull(),
     dedupeKey: text('dedupe_key').notNull(),
     payloadJson: text('payload_json').notNull(),
     status: text('status', { enum: ['queued', 'done', 'failed'] })

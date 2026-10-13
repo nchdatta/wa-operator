@@ -30,6 +30,7 @@ const STEPS = [
   'env',
   'claude',
   'meta',
+  'baileys',
   'flow',
   'templates',
   'pin',
@@ -134,7 +135,10 @@ const steps: Record<Step, () => Promise<void>> = {
     const e = readEnv();
     const home = os.homedir();
     setEnv({
-      CHANNEL: await ask('Chat app: whatsapp or telegram', e.CHANNEL ?? 'whatsapp'),
+      CHANNEL: await ask(
+        'Chat app: whatsapp (Meta Cloud API), baileys (linked device, no Meta) or telegram',
+        e.CHANNEL ?? 'whatsapp',
+      ),
       OPERATOR_WA_ID: (
         await ask("Owner's personal WhatsApp number (country code, digits only)", e.OPERATOR_WA_ID)
       ).replace(/\D/g, ''),
@@ -179,7 +183,7 @@ const steps: Record<Step, () => Promise<void>> = {
   },
 
   async meta() {
-    if (readEnv().CHANNEL === 'telegram') return;
+    if (readEnv().CHANNEL !== 'whatsapp') return;
     log.step('WhatsApp Cloud API');
     console.log('  Needs: App ID, App secret, WhatsApp Business Account ID and a System User token');
     console.log(
@@ -233,8 +237,17 @@ const steps: Record<Step, () => Promise<void>> = {
     log.ok('app subscribed to the WhatsApp Business Account');
   },
 
+  async baileys() {
+    if (readEnv().CHANNEL !== 'baileys') return;
+    log.step('Link the Operator WhatsApp number (Baileys)');
+    log.warn('Unofficial WhatsApp Web link: use a spare number, never the business number. It can be banned.');
+    if (!run('node', ['dist/bin/cli.js', 'baileys', 'link']).ok)
+      throw new Error('not linked; re-run: npm run setup -- --only baileys');
+    log.ok('linked');
+  },
+
   async flow() {
-    if (readEnv().CHANNEL === 'telegram') return;
+    if (readEnv().CHANNEL !== 'whatsapp') return;
     log.step('PIN Flow');
     const e = readEnv();
     if (
@@ -274,7 +287,7 @@ const steps: Record<Step, () => Promise<void>> = {
   },
 
   async templates() {
-    if (readEnv().CHANNEL === 'telegram') return;
+    if (readEnv().CHANNEL !== 'whatsapp') return;
     log.step('Message templates (for when the 24-hour window is closed)');
     const e = readEnv();
     const lang = e.OPERATOR_REPLY_TEMPLATE_LANG ?? 'en';
@@ -307,7 +320,7 @@ const steps: Record<Step, () => Promise<void>> = {
   },
 
   async tunnel() {
-    if (readEnv().CHANNEL === 'telegram') return;
+    if (readEnv().CHANNEL !== 'whatsapp') return;
     log.step('Cloudflare tunnel (public URL for the webhook)');
     console.log('  1. quick  - free trycloudflare.com URL, no domain needed. Changes on every restart;');
     console.log('              the service re-registers the webhook automatically each time.');
@@ -411,7 +424,7 @@ ${cf ? "Start-ScheduledTask -TaskName 'WhatsApp Operator Tunnel'" : ''}`;
   },
 
   async webhook() {
-    if (readEnv().CHANNEL === 'telegram') return;
+    if (readEnv().CHANNEL !== 'whatsapp') return;
     log.step('Webhook (per-account override, other projects on the same app keep theirs)');
     const e = readEnv();
     const port = e.WEBHOOK_PORT ?? '3100';
@@ -464,7 +477,7 @@ ${cf ? "Start-ScheduledTask -TaskName 'WhatsApp Operator Tunnel'" : ''}`;
   },
 
   async watcher() {
-    if (readEnv().CHANNEL === 'telegram') return;
+    if (readEnv().CHANNEL !== 'whatsapp') return;
     log.step('Cloud watcher (Cloudflare Worker, free)');
     if (readEnv().TUNNEL_MODE !== 'named') {
       log.warn('skipped: the watcher needs a stable URL (named tunnel). The quick URL changes on every restart.');

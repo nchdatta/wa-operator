@@ -138,6 +138,22 @@ npx wrangler secret put WHATSAPP_ACCESS_TOKEN
 npx wrangler deploy
 ```
 
+## Baileys: WhatsApp without Meta
+
+`CHANNEL=baileys` connects the Operator number as a **linked device** (like WhatsApp Web) through [Baileys](https://github.com/WhiskeySockets/Baileys). No Meta app, access token, webhook, tunnel, Flow or template, and no 24-hour window.
+
+> **Warning:** this is not an official WhatsApp API and breaks WhatsApp's terms. The number can be banned. Use a spare number, never the business number.
+
+1. Put a spare number's WhatsApp on a phone. Set `CHANNEL=baileys` and `OPERATOR_WA_ID` (the owner's personal number) in `.env`.
+2. Stop the service (`npm stop`), then run `npm run cli -- baileys link` and scan the QR from that phone: **Settings → Linked devices → Link a device**. Or `npm run cli -- baileys link --pair 8801XXXXXXXXX` (the spare number) for an 8-character code.
+3. `npm start`. Message the spare number from the owner's phone.
+
+Differences from the Cloud API:
+- Buttons and lists arrive as numbered text; the owner replies with the number.
+- The PIN is a text reply to the prompt. WhatsApp does not let the bot delete it, so the owner deletes it ("Delete for everyone").
+- Photos or files sent before a service restart must be sent again.
+- The session lives in `data/baileys-auth` (or `BAILEYS_AUTH_DIR`). Anyone with that folder can use the number: keep it private. If the phone logs the device out, run `baileys link --reset`.
+
 ## Telegram fallback
 
 If Meta's terms tighten, switch the owner to a Telegram bot the same day. Nothing else changes.

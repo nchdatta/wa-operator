@@ -3,7 +3,7 @@
  * so moving the owner to Telegram (if Meta's AI policy tightens) is one setting: CHANNEL=telegram.
  */
 
-export type ChannelName = 'whatsapp' | 'telegram';
+export type ChannelName = 'whatsapp' | 'telegram' | 'baileys';
 
 export interface Button {
   /** ≤ 64 bytes (Telegram callback_data limit; WhatsApp allows 256). */
