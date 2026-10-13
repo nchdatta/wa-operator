@@ -76,6 +76,12 @@ const EnvSchema = z
     // Claude subscription (from `claude setup-token`; kept in Windows Credential Manager)
     CLAUDE_CODE_OAUTH_TOKEN: z.string().min(20).optional(),
 
+    /** Data encryption key (64 hex). Made automatically and kept in Credential Manager. */
+    OPERATOR_DATA_KEY: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/, '64 hex characters')
+      .optional(),
+
     // WhatsApp Cloud API
     META_APP_SECRET: z.string().min(16).optional(),
     META_VERIFY_TOKEN: z.string().min(32, 'use a random value of at least 32 characters').optional(),

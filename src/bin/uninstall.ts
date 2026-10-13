@@ -95,8 +95,12 @@ async function removeTunnel(env: Record<string, string>): Promise<void> {
 function removeSecrets(): void {
   log.step('Remove secrets from Windows Credential Manager');
   let n = 0;
-  for (const name of SECRET_NAMES) if (deleteSecret(name)) n++;
-  log.ok(`${n} removed`);
+  for (const name of SECRET_NAMES) {
+    // The data key goes only with the data: without it the kept database could never be read again.
+    if (name === 'OPERATOR_DATA_KEY' && !purge) continue;
+    if (deleteSecret(name)) n++;
+  }
+  log.ok(`${n} removed${purge ? '' : ' (data key kept with data/)'}`);
 }
 
 function purgeFiles(): void {

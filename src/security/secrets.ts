@@ -12,6 +12,8 @@ export const SECRET_NAMES = [
   'META_APP_SECRET',
   'META_VERIFY_TOKEN',
   'TELEGRAM_BOT_TOKEN',
+  /** Encrypts the database and the WhatsApp link session (made automatically). */
+  'OPERATOR_DATA_KEY',
 ] as const;
 export type SecretName = (typeof SECRET_NAMES)[number];
 

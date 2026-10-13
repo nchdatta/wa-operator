@@ -11,10 +11,46 @@ export type Db = BetterSQLite3Database<typeof schema> & { $client: Database.Data
 /** Works from both `src/persistence` (tsx/vitest) and `dist/persistence` (built). */
 export const MIGRATIONS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../drizzle');
 
-/** Open (and migrate) the SQLite database in WAL mode so jobs and approvals survive a crash. */
-export function openDb(file: string): Db {
+/** Set the SQLCipher key; true if the file opens with it. */
+function unlock(sqlite: Database.Database, key: string): boolean {
+  sqlite.pragma("cipher = 'sqlcipher'");
+  sqlite.pragma(`key = '${key}'`);
+  try {
+    sqlite.prepare('SELECT count(*) FROM sqlite_master').get();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** A database left unencrypted by an older version is encrypted in place, once. */
+function encryptExisting(file: string, key: string): void {
+  const plain = new Database(file);
+  try {
+    plain.prepare('SELECT count(*) FROM sqlite_master').get();
+  } catch {
+    plain.close();
+    throw new Error(`${file} cannot be opened with the stored data key (was OPERATOR_DATA_KEY changed or lost?)`);
+  }
+  plain.pragma('journal_mode = DELETE');
+  plain.pragma("cipher = 'sqlcipher'");
+  plain.pragma(`rekey = '${key}'`);
+  plain.close();
+}
+
+/**
+ * Open (and migrate) the SQLite database in WAL mode so jobs and approvals survive a crash.
+ * With a key (always, outside tests) the whole file is encrypted (SQLCipher, AES-256).
+ */
+export function openDb(file: string, key?: string): Db {
   if (file !== ':memory:') fs.mkdirSync(path.dirname(file), { recursive: true });
-  const sqlite = new Database(file);
+  let sqlite = new Database(file);
+  if (key && file !== ':memory:' && !unlock(sqlite, key)) {
+    sqlite.close();
+    encryptExisting(file, key);
+    sqlite = new Database(file);
+    if (!unlock(sqlite, key)) throw new Error(`could not open ${file} after encrypting it`);
+  }
   sqlite.pragma('journal_mode = WAL');
   sqlite.pragma('synchronous = NORMAL');
   sqlite.pragma('foreign_keys = ON');

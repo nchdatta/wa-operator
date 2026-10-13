@@ -10,14 +10,15 @@ import makeWASocket, {
   isJidStatusBroadcast,
   isJidBroadcast,
   normalizeMessageContent,
-  useMultiFileAuthState,
   type WAMessage,
   type WAMessageKey,
   type WASocket,
 } from 'baileys';
 import type { Config } from '../config/env.js';
 import type { Logger } from '../observability/logger.js';
+import { ensureDataKey, subKey } from '../security/data-key.js';
 import { truncate } from '../security/redact.js';
+import { useEncryptedAuthState } from './baileys-auth.js';
 import { MINUTE } from '../shared/clock.js';
 import type { Button, Channel, ListRow, MediaKind, OwnerMessage } from './channel.js';
 import { mimeFor } from './mime.js';
@@ -90,7 +91,8 @@ export class BaileysChannel implements Channel {
   async connect(opts: BaileysConnectOpts = {}): Promise<void> {
     const dir = baileysAuthDir(this.config);
     fs.mkdirSync(dir, { recursive: true });
-    const { state, saveCreds } = await useMultiFileAuthState(dir);
+    const key = subKey(ensureDataKey(this.config.OPERATOR_DATA_KEY), 'baileys-auth');
+    const { state, saveCreds } = await useEncryptedAuthState(dir, key);
     const { version } = await fetchLatestBaileysVersion().catch(() => ({ version: undefined }));
     const sock = makeWASocket({
       auth: state,

@@ -13,6 +13,7 @@ import { createLogger } from '../observability/logger.js';
 import { openDb } from '../persistence/db.js';
 import { storeJob } from '../runtime/jobs.js';
 import { TunnelManager } from '../runtime/tunnel.js';
+import { ensureDataKey } from '../security/data-key.js';
 import { SECRET_NAMES } from '../security/secrets.js';
 import { systemClock } from '../shared/clock.js';
 import { createWebhookApp } from '../webhook/app.js';
@@ -40,7 +41,7 @@ async function main(): Promise<void> {
       'CLAUDE_CODE_OAUTH_TOKEN is not stored; using the existing Claude Code login. Run "wa-operator secret set CLAUDE_CODE_OAUTH_TOKEN".',
     );
   }
-  const db = openDb(config.databasePath);
+  const db = openDb(config.databasePath, ensureDataKey(config.OPERATOR_DATA_KEY));
   const secrets = SECRET_NAMES.map((n) => config[n]).filter((v): v is string => !!v);
   const ctx: AppContext = { config, db, logger, clock: systemClock, secrets };
 

@@ -17,6 +17,7 @@ import { desktopConfigPaths, loadImportedMcp } from '../operator/session.js';
 import { isTier, TIERS } from '../operator/tier.js';
 import { openDb } from '../persistence/db.js';
 import { toolTiers } from '../persistence/schema.js';
+import { ensureDataKey } from '../security/data-key.js';
 import { deleteSecret, readSecrets, SECRET_NAMES, writeSecret, type SecretName } from '../security/secrets.js';
 import { systemClock } from '../shared/clock.js';
 
@@ -46,7 +47,13 @@ function dbContext(): AppContext {
     dataDir,
     databasePath: path.join(dataDir, 'operator.db'),
   } as unknown as Config;
-  return { config, db: openDb(config.databasePath), logger: silentLogger, clock: systemClock, secrets: [] };
+  return {
+    config,
+    db: openDb(config.databasePath, ensureDataKey(vars.OPERATOR_DATA_KEY)),
+    logger: silentLogger,
+    clock: systemClock,
+    secrets: [],
+  };
 }
 
 async function readHidden(prompt: string): Promise<string> {

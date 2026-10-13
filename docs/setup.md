@@ -138,6 +138,14 @@ npx wrangler secret put WHATSAPP_ACCESS_TOKEN
 npx wrangler deploy
 ```
 
+## Data encryption
+
+Everything Operator Mode stores is encrypted at rest:
+- `data/operator.db` (history, approvals, exact actions, queued messages): SQLCipher, AES-256.
+- `data/baileys-auth/` (WhatsApp link session): AES-256-GCM per file.
+
+The key (`OPERATOR_DATA_KEY`) is made on first start and kept in Windows Credential Manager, never next to the data. Older unencrypted files are encrypted automatically on first start. If the key is lost (Windows reinstall, `secret delete`), the old data cannot be read: delete `data/` and set the PIN again. `npm run uninstall` keeps the key unless `--purge` also deletes the data.
+
 ## Baileys: WhatsApp without Meta
 
 `CHANNEL=baileys` connects the Operator number as a **linked device** (like WhatsApp Web) through [Baileys](https://github.com/WhiskeySockets/Baileys). No Meta app, access token, webhook, tunnel, Flow or template, and no 24-hour window.
@@ -152,7 +160,7 @@ Differences from the Cloud API:
 - Buttons and lists arrive as numbered text; the owner replies with the number.
 - The PIN is a text reply to the prompt. WhatsApp does not let the bot delete it, so the owner deletes it ("Delete for everyone").
 - Photos or files sent before a service restart must be sent again.
-- The session lives in `data/baileys-auth` (or `BAILEYS_AUTH_DIR`). Anyone with that folder can use the number: keep it private. If the phone logs the device out, run `baileys link --reset`.
+- The session lives in `data/baileys-auth` (or `BAILEYS_AUTH_DIR`), encrypted. If the phone logs the device out, run `baileys link --reset`.
 
 ## Telegram fallback
 
