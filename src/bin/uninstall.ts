@@ -50,7 +50,7 @@ function stopService(): void {
 if ($t) { Stop-ScheduledTask -TaskName '${t}' -ErrorAction SilentlyContinue; Unregister-ScheduledTask -TaskName '${t}' -Confirm:$false; 'removed' }`);
     if (r.out.includes('removed')) log.ok(`task "${t}" removed`);
   }
-  // A manual `npm start` or the quick tunnel child may still run from this folder.
+  // A manual `npm run dev` or the quick tunnel child may still run from this folder.
   const dir = ROOT.replace(/'/g, "''");
   const r = ps(`Get-CimInstance Win32_Process | Where-Object {
   ($_.Name -eq 'node.exe' -and $_.CommandLine -like '*${dir}*service*' -and $_.ProcessId -ne ${process.pid}) -or

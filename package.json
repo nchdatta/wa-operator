@@ -12,24 +12,18 @@
     "wa-operator-svc": "dist/bin/service.js"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
-    "typecheck": "tsc --noEmit",
-    "lint": "eslint .",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "dev": "tsx src/bin/service.ts",
-    "start": "node dist/bin/service.js",
-    "cli": "tsx src/bin/cli.ts",
-    "db:generate": "drizzle-kit generate",
-    "format": "prettier --write .",
     "setup": "tsx src/bin/setup.ts",
     "uninstall": "tsx src/bin/uninstall.ts",
+    "start": "schtasks /run /tn \"WhatsApp Operator Mode\"",
+    "stop": "schtasks /end /tn \"WhatsApp Operator Mode\"",
+    "restart": "npm run build && npm stop && timeout /t 2 /nobreak >nul && npm start",
+    "logs": "powershell -NoProfile -Command \"Get-Content logs/operator.log -Tail 30 -Wait\"",
     "doctor": "tsx src/bin/cli.ts doctor",
-    "svc:start": "schtasks /run /tn \"WhatsApp Operator Mode\"",
-    "svc:stop": "schtasks /end /tn \"WhatsApp Operator Mode\"",
-    "svc:restart": "npm run svc:stop && timeout /t 2 /nobreak >nul && npm run svc:start",
-    "svc:status": "schtasks /query /tn \"WhatsApp Operator Mode\" /fo list && curl -s -m 3 http://127.0.0.1:3100/health/ready",
-    "svc:logs": "powershell -NoProfile -Command \"Get-Content logs/operator.log -Tail 30 -Wait\""
+    "cli": "tsx src/bin/cli.ts",
+    "dev": "tsx src/bin/service.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "check": "tsc --noEmit && eslint . && vitest run"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.296",

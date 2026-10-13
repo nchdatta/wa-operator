@@ -81,7 +81,7 @@ Nothing proactive is sent otherwise: the PIN is only asked after the owner write
 ```powershell
 npm run cli -- set-pin       # 4–12 digits, not 1234 / 1111
 npm run cli -- check         # validates config, Meta, Flow, PIN
-npm start
+npm start          # starts the background service (after setup -- --only autostart); npm run dev runs it in this window
 ```
 
 The service listens on `127.0.0.1:3100`. Next, expose it with a named tunnel:
@@ -180,9 +180,12 @@ Not undone, change these by hand if needed:
 
 | Command | What it does |
 |---|---|
-| `npm run svc:start` | Start the background service (logon task) |
-| `npm run svc:stop` | Stop it |
-| `npm run svc:restart` | Restart it (after changing `.env` or `config/mcp.json`) |
-| `npm run svc:status` | Task state and health check |
-| `npm run svc:logs` | Follow the log |
+| `npm start` / `npm stop` | Start / stop the background service |
+| `npm run restart` | Rebuild and restart (after changing code, `.env` or `config/mcp.json`) |
+| `npm run logs` | Follow the log |
 | `npm run doctor` | Check login, service, tunnel, webhook, MCP servers, PIN |
+| `npm run cli -- <cmd>` | PC controls: `set-pin`, `enable`, `tiers`, `secret` … |
+| `npm run dev` | Run in this window (stops when it closes) |
+| `npm run check` | Typecheck, lint and test |
+
+Install / remove: `install.cmd` / `uninstall.cmd` (or `npm run setup` / `npm run uninstall`).
