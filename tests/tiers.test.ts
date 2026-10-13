@@ -5,7 +5,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { DENY_NAMES, type PathPolicy } from '../src/operator/paths.js';
 import { analyzeShell } from '../src/operator/shell.js';
 import type { Tier } from '../src/operator/tier.js';
-import { classify, suggestMcpTier, type TierContext } from '../src/operator/tiers.js';
+import { classify, stillAsksInFullTrust, suggestMcpTier, type TierContext } from '../src/operator/tiers.js';
 import { tempDir } from './helpers.js';
 
 let base: string;
@@ -194,5 +194,22 @@ describe('taint', () => {
     ).toBe('LOW');
     expect(analyzeShell('curl https://x.example', 'bash', work, policy).tier).toBe('HIGH');
     expect(classify('Bash', { command: 'curl https://x.example' }, work, ctx({ tainted: true })).tier).toBe('CRITICAL');
+  });
+});
+
+describe('full trust', () => {
+  it('lets commands, scripts and edits run', () => {
+    expect(stillAsksInFullTrust('PowerShell', 'unknown program python')).toBe(false);
+    expect(stillAsksInFullTrust('Bash', 'chained commands')).toBe(false);
+    expect(stillAsksInFullTrust('mcp__claude-in-chrome__javascript_tool', 'unconfirmed tool')).toBe(false);
+    expect(stillAsksInFullTrust('mcp__whatsapp-out__send_file', 'outside work folders')).toBe(false);
+  });
+  it('still asks for sends, deletes, installs and network', () => {
+    expect(stillAsksInFullTrust('mcp__claude_ai_Gmail__send_message', '')).toBe(true);
+    expect(stillAsksInFullTrust('mcp__claude_ai_Gmail__trash_thread', '')).toBe(true);
+    expect(stillAsksInFullTrust('mcp__claude_ai_Gmail__create_draft', '')).toBe(false);
+    expect(stillAsksInFullTrust('PowerShell', 'deletes inside the work folders')).toBe(true);
+    expect(stillAsksInFullTrust('PowerShell', 'installs software')).toBe(true);
+    expect(stillAsksInFullTrust('Bash', 'curl uses the network')).toBe(true);
   });
 });

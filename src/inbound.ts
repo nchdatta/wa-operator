@@ -28,7 +28,7 @@ const HELP = `Operator Mode commands:
 /stop – stop the current task
 /status – what's going on
 /new – start a fresh conversation
-/trust on|off – let file edits and sheet rows run without asking
+/trust on|full|off – on: edits run without asking; full: commands too (sends/deletes still ask)
 /lock – lock until the next PIN
 /kill – stop everything and lock
 Anything else is an instruction for the PC.`;
@@ -247,7 +247,7 @@ export class Inbound {
           s.enabled ? (gate.isUnlocked() ? '🔓 Unlocked' : '🔒 Locked') : `⏸️ Off (${s.disabledReason ?? 'disabled'})`,
           session.busy ? '⚙️ Working on a task' : '💤 Idle',
           `📥 Queued: ${runs.queuedCount()}`,
-          `🤝 Trusted mode: ${s.trusted ? 'on' : 'off'}`,
+          `🤝 Trusted mode: ${s.fullTrust ? 'full' : s.trusted ? 'on' : 'off'}`,
           `📊 Claude usage: ${governor.describe()}`,
         ];
         await chat.say(lines.join('\n'), { format: false });
@@ -271,15 +271,17 @@ export class Inbound {
         await chat.say('🆕 Fresh conversation started.');
         return;
       case '/trust':
-        if (arg !== 'on' && arg !== 'off') {
-          await chat.say('Use /trust on or /trust off.');
+        if (arg !== 'on' && arg !== 'off' && arg !== 'full') {
+          await chat.say('Use /trust on, /trust full or /trust off.');
           return;
         }
-        gate.setTrusted(arg === 'on');
+        gate.setTrusted(arg === 'full' ? 'full' : arg === 'on');
         await chat.say(
-          arg === 'on'
-            ? '🤝 Trusted mode on: file edits in work folders, sheet rows and Drive saves run without asking. Sends and commands still ask.'
-            : '🤝 Trusted mode off: every change asks first.',
+          arg === 'full'
+            ? '🤝 Full trust on: commands, scripts and file edits run without asking. Sending, deleting, installing, network commands and admin changes still ask, and so does anything after Claude reads an email or web page.'
+            : arg === 'on'
+              ? '🤝 Trusted mode on: file edits in work folders, sheet rows and Drive saves run without asking. Sends and commands still ask.'
+              : '🤝 Trusted mode off: every change asks first.',
         );
         return;
       default:

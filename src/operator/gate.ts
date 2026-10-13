@@ -177,8 +177,13 @@ export class Gate {
     audit(this.ctx, { actor: 'cli', action: 'gate.set_pin', outcome: 'ok' });
   }
 
-  setTrusted(on: boolean): void {
-    this.update({ trusted: on });
-    audit(this.ctx, { actor: 'owner', action: 'gate.trusted', outcome: on ? 'on' : 'off' });
+  /** off, on (MEDIUM runs) or full (MEDIUM and most HIGH run). */
+  setTrusted(level: boolean | 'full'): void {
+    this.update({ trusted: level !== false, fullTrust: level === 'full' });
+    audit(this.ctx, {
+      actor: 'owner',
+      action: 'gate.trusted',
+      outcome: level === 'full' ? 'full' : level ? 'on' : 'off',
+    });
   }
 }

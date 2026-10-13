@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { Command } from 'commander';
 import { parse as parseDotenv } from 'dotenv';
@@ -11,6 +10,7 @@ import type { AppContext } from '../context.js';
 import { MetaClient } from '../meta/client.js';
 import { silentLogger } from '../observability/logger.js';
 import { Gate } from '../operator/gate.js';
+import { desktopConfigPaths } from '../operator/session.js';
 import { isTier, TIERS } from '../operator/tier.js';
 import { openDb } from '../persistence/db.js';
 import { toolTiers } from '../persistence/schema.js';
@@ -232,14 +232,12 @@ secret.command('delete <name>').action((name: string) => {
 
 program
   .command('import-desktop-mcp')
-  .description("Copy Claude Desktop's MCP servers into config/mcp.json so Operator Mode can use them.")
+  .description(
+    "Snapshot Claude Desktop's MCP servers into config/mcp.json (optional: they are also read live at start).",
+  )
   .action(() => {
-    const src = path.join(
-      process.env.APPDATA ?? path.join(os.homedir(), 'AppData', 'Roaming'),
-      'Claude',
-      'claude_desktop_config.json',
-    );
-    if (!fs.existsSync(src)) throw new Error(`Not found: ${src}`);
+    const src = desktopConfigPaths()[0];
+    if (!src) throw new Error('claude_desktop_config.json not found (classic or Microsoft Store install)');
     const desktop = JSON.parse(fs.readFileSync(src, 'utf8')) as { mcpServers?: Record<string, unknown> };
     const servers = desktop.mcpServers ?? {};
     const out = path.join(appRoot(), 'config', 'mcp.json');

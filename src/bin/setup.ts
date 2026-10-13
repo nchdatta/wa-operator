@@ -165,11 +165,17 @@ const steps: Record<Step, () => Promise<void>> = {
   },
 
   async claude() {
-    log.step('Claude subscription token');
-    if (secrets.CLAUDE_CODE_OAUTH_TOKEN && !(await confirm('A token is already stored. Replace it?', false))) return;
-    console.log('  A browser opens to log in; copy the token it prints.');
-    run('claude', ['setup-token']);
-    await secret('CLAUDE_CODE_OAUTH_TOKEN', 'Paste the token');
+    // The normal Claude Code login, not `claude setup-token`: that token is inference-only and cannot use
+    // claude.ai connectors (Gmail, Calendar, Drive).
+    log.step('Claude subscription login');
+    const creds = path.join(os.homedir(), '.claude', '.credentials.json');
+    if (!fs.existsSync(creds)) {
+      console.log('  Not logged in. In another terminal run:  claude   then type  /login  and finish in the browser.');
+      while (!fs.existsSync(creds) && (await confirm('Logged in now?', true)) === true && !fs.existsSync(creds))
+        log.warn(`still no login at ${creds}`);
+      if (!fs.existsSync(creds)) throw new Error('Claude login missing; re-run: npm run setup -- --only claude');
+    }
+    log.ok('using your Claude Code login (connectors like Gmail included)');
   },
 
   async meta() {

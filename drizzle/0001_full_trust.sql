@@ -1,0 +1,1 @@
+ALTER TABLE `operator_state` ADD `full_trust` integer DEFAULT false NOT NULL;

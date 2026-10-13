@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import {
   query,
@@ -27,7 +28,7 @@ import { DENY_NAMES, defaultDenyPaths, realPath, type PathPolicy } from './paths
 import { operatorRules } from './scope.js';
 import { TaintTracker } from './taint.js';
 import { isTier, type Tier } from './tier.js';
-import { classify, suggestMcpTier } from './tiers.js';
+import { classify, stillAsksInFullTrust, suggestMcpTier } from './tiers.js';
 
 /**
  * One warm Claude Agent SDK session per day on the owner's Claude subscription. Owner messages are
@@ -123,15 +124,38 @@ function userMessage(text: string): SDKUserMessage {
   } as SDKUserMessage;
 }
 
-/** Desktop-only MCP servers imported once with `wa-operator import-desktop-mcp`. */
-export function loadImportedMcp(ctx: AppContext): Record<string, McpServerConfig> {
-  const file = path.join(ctx.config.appDir, 'config', 'mcp.json');
+/** claude_desktop_config.json for the classic installer and the Microsoft Store (MSIX) build. */
+export function desktopConfigPaths(): string[] {
+  const appData = process.env.APPDATA ?? path.join(os.homedir(), 'AppData', 'Roaming');
+  const local = process.env.LOCALAPPDATA ?? path.join(os.homedir(), 'AppData', 'Local');
+  const out = [path.join(appData, 'Claude', 'claude_desktop_config.json')];
+  try {
+    for (const d of fs.readdirSync(path.join(local, 'Packages')))
+      if (/^Claude_/i.test(d))
+        out.push(path.join(local, 'Packages', d, 'LocalCache', 'Roaming', 'Claude', 'claude_desktop_config.json'));
+  } catch {
+    // no Store apps folder
+  }
+  return out.filter((f) => fs.existsSync(f));
+}
+
+function readMcpFile(file: string): Record<string, McpServerConfig> {
   try {
     const parsed = JSON.parse(fs.readFileSync(file, 'utf8')) as { mcpServers?: Record<string, McpServerConfig> };
     return parsed.mcpServers ?? {};
   } catch {
     return {};
   }
+}
+
+/**
+ * Claude Desktop's local MCP servers (read live, so a server added in Desktop shows up after a restart) plus
+ * config/mcp.json, which wins on a name clash. Claude Code's own servers, plugins, skills and claude.ai
+ * connectors come in through settingSources ['user'].
+ */
+export function loadImportedMcp(ctx: AppContext): Record<string, McpServerConfig> {
+  const desktop = Object.assign({}, ...desktopConfigPaths().map(readMcpFile)) as Record<string, McpServerConfig>;
+  return { ...desktop, ...readMcpFile(path.join(ctx.config.appDir, 'config', 'mcp.json')) };
 }
 
 export function buildPathPolicy(ctx: AppContext): PathPolicy {
@@ -319,7 +343,10 @@ export class OperatorSession {
 
     let allowed = false;
     let reason = c.reason;
-    if (c.tier === 'LOW' || (c.tier === 'MEDIUM' && this.gate.state().trusted)) {
+    const g = this.gate.state();
+    const fullTrustAllows =
+      g.fullTrust && c.tier === 'HIGH' && !run.taint.tainted && !stillAsksInFullTrust(toolName, c.reason);
+    if (c.tier === 'LOW' || (c.tier === 'MEDIUM' && g.trusted) || fullTrustAllows) {
       allowed = true;
     } else if (c.tier === 'DENY') {
       audit(this.ctx, { actor: 'claude', action: 'tool.denied', outcome: 'DENY', metadata: meta });

@@ -315,6 +315,21 @@ export function suggestMcpTier(toolName: string): Tier {
   return 'HIGH';
 }
 
+/**
+ * Full trust still asks for these HIGH calls: anything that sends or posts, deletes, installs, or uses
+ * the network from a command. Everything else HIGH (commands, scripts, edits, unknown tools) runs.
+ */
+export function stillAsksInFullTrust(toolName: string, reason: string): boolean {
+  // Files and screenshots sent back to the owner's own chat are not outward.
+  if (toolName.startsWith('mcp__whatsapp-out__')) return false;
+  if (toolName.startsWith('mcp__')) {
+    const w = words(toolName.split('__').slice(2).join('_'));
+    if (w.some((x) => SEND_WORDS.includes(x)) && !w.includes('draft')) return true;
+    if (w.some((x) => DELETE_WORDS.includes(x))) return true;
+  }
+  return /delet|remov|uses the network|installs|downloads|encoded|outside|schedules/i.test(reason);
+}
+
 function classifyMcp(toolName: string, input: Record<string, unknown>, cwd: string, ctx: TierContext): Classification {
   const tool = toolName.split('__').slice(2).join('__');
   const w = words(tool);
