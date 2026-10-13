@@ -243,13 +243,26 @@ export class Inbound {
         return;
       case '/status': {
         const s = gate.state();
+        const info = session.info();
+        const now = this.d.ctx.clock.now();
+        const mins = (ms: number) => `${Math.max(0, Math.round(ms / 60_000))} min`;
+        const idleLeft =
+          gate.isUnlocked() && s.lastActivityAt !== null
+            ? ` (locks after ${mins(s.lastActivityAt + this.d.ctx.config.OPERATOR_IDLE_MIN * 60_000 - now)} idle)`
+            : '';
         const lines = [
-          s.enabled ? (gate.isUnlocked() ? '🔓 Unlocked' : '🔒 Locked') : `⏸️ Off (${s.disabledReason ?? 'disabled'})`,
+          s.enabled
+            ? gate.isUnlocked()
+              ? `🔓 Unlocked${idleLeft}`
+              : '🔒 Locked'
+            : `⏸️ Off (${s.disabledReason ?? 'disabled'})`,
           session.busy ? '⚙️ Working on a task' : '💤 Idle',
           `📥 Queued: ${runs.queuedCount()}`,
           `🤝 Trusted mode: ${s.fullTrust ? 'full' : s.trusted ? 'on' : 'off'}`,
+          `🧠 Model: ${info.model ?? this.d.ctx.config.OPERATOR_MODEL}${info.startedAt ? ` · conversation ${mins(now - info.startedAt)} old` : ''}`,
           `📊 Claude usage: ${governor.describe()}`,
         ];
+        if (info.failedServers.length) lines.push(`⚠️ Not connected: ${info.failedServers.join(', ')}`);
         await chat.say(lines.join('\n'), { format: false });
         return;
       }
@@ -278,7 +291,7 @@ export class Inbound {
         gate.setTrusted(arg === 'full' ? 'full' : arg === 'on');
         await chat.say(
           arg === 'full'
-            ? '🤝 Full trust on: commands, scripts and file edits run without asking. Sending, deleting, installing, network commands and admin changes still ask, and so does anything after Claude reads an email or web page.'
+            ? '🤝 Full trust on: commands, scripts and file edits run without asking. Sending, deleting, installing, network commands, changes outside your work folders and admin changes still ask, and so does anything after Claude reads an email or web page.'
             : arg === 'on'
               ? '🤝 Trusted mode on: file edits in work folders, sheet rows and Drive saves run without asking. Sends and commands still ask.'
               : '🤝 Trusted mode off: every change asks first.',

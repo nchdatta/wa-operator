@@ -1,0 +1,1 @@
+ALTER TABLE `operator_state` ADD `rate_limit` text;

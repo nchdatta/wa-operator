@@ -1,5 +1,7 @@
+import { eq } from 'drizzle-orm';
 import { audit } from '../audit.js';
 import type { AppContext } from '../context.js';
+import { operatorState } from '../persistence/schema.js';
 
 /**
  * Usage governor. Operator Mode shares the owner's Claude subscription with Claude Desktop.
@@ -25,7 +27,18 @@ export class Governor {
   constructor(
     private readonly ctx: AppContext,
     private readonly notify: (text: string) => Promise<void>,
-  ) {}
+  ) {
+    // Pick up the last known state, so a restart while limited does not start tasks that will fail.
+    try {
+      const raw = ctx.db.select().from(operatorState).where(eq(operatorState.id, 1)).get()?.rateLimit;
+      if (raw) {
+        this.info = JSON.parse(raw) as RateLimitInfo;
+        this.notified = this.level;
+      }
+    } catch {
+      // no state yet
+    }
+  }
 
   get level(): GovernorLevel {
     const i = this.info;
@@ -38,6 +51,11 @@ export class Governor {
   /** Feed every `rate_limit_event` from the Claude session. */
   async update(info: RateLimitInfo): Promise<void> {
     this.info = info;
+    this.ctx.db
+      .update(operatorState)
+      .set({ rateLimit: JSON.stringify(info) })
+      .where(eq(operatorState.id, 1))
+      .run();
     const level = this.level;
     if (level === this.notified) return;
     const resets = info.resetsAt ? ` It resets ${this.when(info.resetsAt)}.` : '';

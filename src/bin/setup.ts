@@ -335,6 +335,9 @@ const steps: Record<Step, () => Promise<void>> = {
     if (mode === 'quick') {
       setEnv({ TUNNEL_MODE: 'quick', CLOUDFLARED_BIN: bin });
       log.ok('quick tunnel: the service starts it and registers the webhook on every start');
+      log.warn(
+        'quick tunnels drop sometimes and change URL on restart; switch to a named tunnel once you have a domain',
+      );
       return;
     }
     const cfDir = path.join(os.homedir(), '.cloudflared');

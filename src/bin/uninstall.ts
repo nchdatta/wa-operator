@@ -15,6 +15,7 @@ import { MetaClient } from '../meta/client.js';
 import { silentLogger } from '../observability/logger.js';
 import { deleteSecret, readSecrets, SECRET_NAMES } from '../security/secrets.js';
 import { confirm } from '../shared/prompt.js';
+import { purgePaths } from '../shared/purge.js';
 
 process.noDeprecation = true;
 
@@ -100,8 +101,8 @@ function removeSecrets(): void {
 
 function purgeFiles(): void {
   log.step('Delete local files');
-  for (const p of ['data', 'logs', 'dist']) {
-    const full = path.join(ROOT, p);
+  for (const full of purgePaths(ROOT)) {
+    const p = path.basename(full);
     if (!fs.existsSync(full)) continue;
     try {
       fs.rmSync(full, { recursive: true, force: true });

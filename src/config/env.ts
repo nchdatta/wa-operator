@@ -42,6 +42,12 @@ const EnvSchema = z
     OPERATOR_OUTBOX: z.string().optional(),
     OPERATOR_IDLE_MIN: int(1, 24 * 60).default(30),
     OPERATOR_MODEL: z.string().min(1).max(80).default('opus'),
+    /** Model for short, simple requests (screenshot, a quick read). "off" uses OPERATOR_MODEL for everything. */
+    OPERATOR_FAST_MODEL: z.string().min(1).max(80).default('sonnet'),
+    /** Only these Claude Desktop / config/mcp.json servers load (comma separated). Empty = all. */
+    OPERATOR_MCP_ALLOW: csv.default([]),
+    /** Start a fresh conversation when the last task ended this many minutes ago (0 = only at midnight). */
+    OPERATOR_FRESH_AFTER_MIN: int(0, 24 * 60).default(120),
     OPERATOR_MAX_TURNS: int(1, 500).default(40),
     OPERATOR_APPROVAL_TTL_SECONDS: int(30, 3600).default(300),
     OPERATOR_PROGRESS_SECONDS: int(5, 600).default(30),

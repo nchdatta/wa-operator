@@ -1,5 +1,7 @@
 #!/usr/bin/env node
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { Command } from 'commander';
 import { parse as parseDotenv } from 'dotenv';
@@ -10,7 +12,7 @@ import type { AppContext } from '../context.js';
 import { MetaClient } from '../meta/client.js';
 import { silentLogger } from '../observability/logger.js';
 import { Gate } from '../operator/gate.js';
-import { desktopConfigPaths } from '../operator/session.js';
+import { desktopConfigPaths, loadImportedMcp } from '../operator/session.js';
 import { isTier, TIERS } from '../operator/tier.js';
 import { openDb } from '../persistence/db.js';
 import { toolTiers } from '../persistence/schema.js';
@@ -291,6 +293,110 @@ program
     }
     const gate = new Gate(dbContext());
     console.log(`${gate.hasPin() ? '✔' : '✘'} PIN ${gate.hasPin() ? 'set' : 'not set (wa-operator set-pin)'}`);
+  });
+
+program
+  .command('doctor')
+  .description('Check everything Operator Mode needs: login, service, tunnel, webhook, MCP servers, PIN.')
+  .action(async () => {
+    let bad = 0;
+    const line = (ok: boolean | 'warn', text: string) => {
+      if (ok === false) bad++;
+      console.log(`${ok === true ? '✔' : ok === 'warn' ? '!' : '✘'} ${text}`);
+    };
+    const tryStep = async (name: string, fn: () => Promise<void> | void) => {
+      try {
+        await fn();
+      } catch (e) {
+        line(false, `${name}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    };
+
+    let config: Config | null = null;
+    await tryStep('config', () => {
+      config = loadConfig();
+      line(true, `config OK (channel ${config.CHANNEL}, roots ${config.roots.join(', ')})`);
+    });
+    const c = config as Config | null;
+
+    const creds = path.join(os.homedir(), '.claude', '.credentials.json');
+    line(
+      fs.existsSync(creds) || !!c?.CLAUDE_CODE_OAUTH_TOKEN,
+      fs.existsSync(creds) || c?.CLAUDE_CODE_OAUTH_TOKEN
+        ? 'Claude login found'
+        : 'Claude login missing: run `claude`, then /login',
+    );
+    if (!c) return void (process.exitCode = 1);
+    line(true, `models: ${c.OPERATOR_MODEL} (main), ${c.OPERATOR_FAST_MODEL} (quick requests)`);
+
+    await tryStep('service', async () => {
+      const res = await fetch(`http://127.0.0.1:${c.WEBHOOK_PORT}/health/ready`, { signal: AbortSignal.timeout(3000) });
+      line(res.ok, `service ${res.ok ? 'running' : `not ready (HTTP ${res.status})`} on port ${c.WEBHOOK_PORT}`);
+    }).catch(() => undefined);
+    if (process.platform === 'win32') {
+      const tasks = ['WhatsApp Operator Mode', ...(c.TUNNEL_MODE === 'named' ? ['WhatsApp Operator Tunnel'] : [])];
+      for (const t of tasks) {
+        const r = spawnSync('schtasks', ['/query', '/tn', t], { encoding: 'utf8' });
+        line(
+          r.status === 0 ? true : 'warn',
+          `logon task "${t}" ${r.status === 0 ? 'registered' : 'missing (npm run setup -- --only autostart)'}`,
+        );
+      }
+    }
+    line(
+      c.TUNNEL_MODE === 'named' ? true : 'warn',
+      c.TUNNEL_MODE === 'named'
+        ? 'named tunnel (stable URL)'
+        : `tunnel mode ${c.TUNNEL_MODE}: the URL changes on restart. A named tunnel is steadier once you have a domain (npm run setup -- --only tunnel)`,
+    );
+
+    if (c.CHANNEL === 'whatsapp') {
+      const client = new MetaClient({
+        baseUrl: c.graphBaseUrl,
+        accessToken: c.WHATSAPP_ACCESS_TOKEN!,
+        appSecret: c.META_APP_SECRET!,
+        appsecretProof: c.META_APPSECRET_PROOF,
+        logger: silentLogger,
+      });
+      await tryStep('WhatsApp', async () => {
+        const info = await client.request<{ display_phone_number?: string }>({
+          method: 'GET',
+          path: `/${c.WHATSAPP_PHONE_NUMBER_ID}`,
+          query: { fields: 'display_phone_number' },
+        });
+        line(true, `WhatsApp number ${info.display_phone_number ?? '?'}`);
+      });
+      if (c.WHATSAPP_BUSINESS_ACCOUNT_ID)
+        await tryStep('webhook', async () => {
+          const r = await client.request<{ data?: { override_callback_uri?: string }[] }>({
+            method: 'GET',
+            path: `/${c.WHATSAPP_BUSINESS_ACCOUNT_ID}/subscribed_apps`,
+          });
+          const uri = r.data?.find((d) => d.override_callback_uri)?.override_callback_uri;
+          line(!!uri, uri ? `webhook → ${uri}` : 'no webhook override registered (is the service running?)');
+        });
+      line(
+        c.OPERATOR_PIN_FLOW_MODE === 'text' || !!c.OPERATOR_PIN_FLOW_ID ? true : 'warn',
+        c.OPERATOR_PIN_FLOW_MODE === 'text'
+          ? 'PIN by text reply (Flow blocked until Meta verifies the business)'
+          : `PIN Flow ${c.OPERATOR_PIN_FLOW_ID ?? 'not set'} (${c.OPERATOR_PIN_FLOW_MODE})`,
+      );
+    }
+
+    const { servers, skipped } = loadImportedMcp({ config: c } as AppContext);
+    line(true, `MCP servers from Claude Desktop / config: ${Object.keys(servers).join(', ') || 'none'}`);
+    for (const s of skipped) line('warn', `MCP server skipped: ${s}. Fix the path in Claude Desktop's settings.`);
+    if (c.OPERATOR_MCP_ALLOW.length) line(true, `MCP allow list: ${c.OPERATOR_MCP_ALLOW.join(', ')}`);
+
+    const gate = new Gate(dbContext());
+    line(gate.hasPin(), `PIN ${gate.hasPin() ? 'set' : 'not set (wa-operator set-pin)'}`);
+    const s = gate.state();
+    line(
+      s.enabled ? true : false,
+      `Operator Mode ${s.enabled ? 'on' : `off (${s.disabledReason ?? 'disabled'}): wa-operator enable`}`,
+    );
+    console.log(bad ? `\n${bad} problem(s) found.` : '\nAll good.');
+    if (bad) process.exitCode = 1;
   });
 
 program.parseAsync().catch((e: unknown) => {

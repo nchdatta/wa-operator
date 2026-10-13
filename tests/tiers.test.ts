@@ -198,18 +198,23 @@ describe('taint', () => {
 });
 
 describe('full trust', () => {
+  const asks = (name: string, input: Record<string, unknown>) =>
+    stillAsksInFullTrust(classify(name, input, work, ctx()));
   it('lets commands, scripts and edits run', () => {
-    expect(stillAsksInFullTrust('PowerShell', 'unknown program python')).toBe(false);
-    expect(stillAsksInFullTrust('Bash', 'chained commands')).toBe(false);
-    expect(stillAsksInFullTrust('mcp__claude-in-chrome__javascript_tool', 'unconfirmed tool')).toBe(false);
-    expect(stillAsksInFullTrust('mcp__whatsapp-out__send_file', 'outside work folders')).toBe(false);
+    expect(asks('PowerShell', { command: 'python report.py' })).toBe(false);
+    expect(asks('Bash', { command: 'git status; git log' })).toBe(false);
+    expect(asks('mcp__claude-in-chrome__javascript_tool', {})).toBe(false);
+    expect(asks('mcp__whatsapp-out__send_file', { path: path.join(base, 'x.txt') })).toBe(false);
+    expect(asks('mcp__claude_ai_Gmail__get_reply_count', {})).toBe(false);
   });
-  it('still asks for sends, deletes, installs and network', () => {
-    expect(stillAsksInFullTrust('mcp__claude_ai_Gmail__send_message', '')).toBe(true);
-    expect(stillAsksInFullTrust('mcp__claude_ai_Gmail__trash_thread', '')).toBe(true);
-    expect(stillAsksInFullTrust('mcp__claude_ai_Gmail__create_draft', '')).toBe(false);
-    expect(stillAsksInFullTrust('PowerShell', 'deletes inside the work folders')).toBe(true);
-    expect(stillAsksInFullTrust('PowerShell', 'installs software')).toBe(true);
-    expect(stillAsksInFullTrust('Bash', 'curl uses the network')).toBe(true);
+  it('still asks for sends, deletes, installs, network and outside edits', () => {
+    expect(asks('mcp__claude_ai_Gmail__send_message', {})).toBe(true);
+    expect(asks('mcp__claude_ai_Gmail__trash_thread', {})).toBe(true);
+    expect(asks('mcp__claude_ai_Gmail__create_draft', {})).toBe(false);
+    expect(asks('PowerShell', { command: 'Remove-Item notes.txt' })).toBe(true);
+    expect(asks('PowerShell', { command: 'winget install foo' })).toBe(true);
+    expect(asks('Bash', { command: 'curl https://x.example' })).toBe(true);
+    expect(asks('Write', { file_path: path.join(base, 'other.txt'), content: 'x' })).toBe(true);
+    expect(asks('CronCreate', {})).toBe(true);
   });
 });

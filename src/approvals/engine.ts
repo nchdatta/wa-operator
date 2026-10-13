@@ -24,24 +24,29 @@ export interface ApprovalRequest {
   input: Record<string, unknown>;
   tier: ApprovalTier;
   reason: string;
+  /** Offer a "remember" button (replaces ✏️ Edit) with this title, e.g. "✅ Always" or "✅ Today". */
+  remember?: string;
 }
 
 export type ApprovalOutcome =
-  | { decision: 'approved' }
+  | { decision: 'approved'; remember?: boolean }
   | { decision: 'rejected' }
   | { decision: 'expired' }
   | { decision: 'edit'; note: string }
   | { decision: 'failed'; error: string };
 
-const BUTTON_RE = /^apv:(a|r|e):([0-9A-HJKMNP-TV-Z]{26})$/;
+/** a = approve, r = cancel, e = edit, w = approve and remember. */
+type ButtonKind = 'a' | 'r' | 'e' | 'w';
 
-export function approvalButton(kind: 'a' | 'r' | 'e', id: string): string {
+const BUTTON_RE = /^apv:(a|r|e|w):([0-9A-HJKMNP-TV-Z]{26})$/;
+
+export function approvalButton(kind: ButtonKind, id: string): string {
   return `apv:${kind}:${id}`;
 }
 
-export function parseApprovalButton(id: string): { kind: 'a' | 'r' | 'e'; approvalId: string } | null {
+export function parseApprovalButton(id: string): { kind: ButtonKind; approvalId: string } | null {
   const m = BUTTON_RE.exec(id);
-  return m ? { kind: m[1] as 'a' | 'r' | 'e', approvalId: m[2]! } : null;
+  return m ? { kind: m[1] as ButtonKind, approvalId: m[2]! } : null;
 }
 
 const s = (v: unknown, max = 700): string =>
@@ -203,7 +208,8 @@ export class ApprovalEngine {
       await this.chat.requestPin(token, `🔐 Enter your PIN to approve the critical action above (${id.slice(-6)}).`);
     } else {
       const buttons = [{ id: approvalButton('a', id), title: '✅ Approve' }];
-      if (req.tier === 'HIGH') buttons.push({ id: approvalButton('e', id), title: '✏️ Edit' });
+      if (req.remember) buttons.push({ id: approvalButton('w', id), title: req.remember });
+      else if (req.tier === 'HIGH') buttons.push({ id: approvalButton('e', id), title: '✏️ Edit' });
       buttons.push({ id: approvalButton('r', id), title: '❌ Cancel' });
       cardId = await this.chat.buttons(body, buttons, { footer });
     }
@@ -260,14 +266,20 @@ export class ApprovalEngine {
       await this.chat.notify(`✏️ What should change? Reply with the correction (${tag}).`);
       return true;
     }
-    if (b.kind === 'a' && row.needsPin) {
+    if (b.kind !== 'r' && row.needsPin) {
       await this.chat.notify(`🔐 This one needs your PIN (${tag}). Use the PIN form above.`);
       return true;
     }
-    const status = b.kind === 'a' ? 'approved' : 'rejected';
+    const status = b.kind === 'r' ? 'rejected' : 'approved';
     if (this.finish(row.id, status)) {
-      audit(this.ctx, { actor: 'owner', action: `approval.${status}`, target: row.id, outcome: 'ok' });
-      this.resolve(row.id, { decision: status });
+      const remember = b.kind === 'w';
+      audit(this.ctx, {
+        actor: 'owner',
+        action: `approval.${status}`,
+        target: row.id,
+        outcome: remember ? 'remember' : 'ok',
+      });
+      this.resolve(row.id, status === 'approved' && remember ? { decision: status, remember } : { decision: status });
       if (status === 'rejected') await this.chat.notify(`❌ Cancelled (${tag}).`);
     } else {
       await this.chat.notify(`⌛ That request (${tag}) is no longer open. Nothing was done.`);

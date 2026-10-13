@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, count, eq, inArray } from 'drizzle-orm';
 import { audit } from '../audit.js';
 import type { OwnerChat } from '../channels/owner-chat.js';
 import type { AppContext } from '../context.js';
@@ -32,7 +32,7 @@ export class RunQueue {
   }
 
   queuedCount(): number {
-    return this.ctx.db.select().from(operatorRuns).where(eq(operatorRuns.status, 'queued')).all().length;
+    return this.ctx.db.select({ n: count() }).from(operatorRuns).where(eq(operatorRuns.status, 'queued')).get()?.n ?? 0;
   }
 
   async enqueue(prompt: string, sourceMessageId: string | null): Promise<string> {

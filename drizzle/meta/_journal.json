@@ -15,6 +15,13 @@
       "when": 1791884252309,
       "tag": "0001_full_trust",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1791888642483,
+      "tag": "0002_governor_state",
+      "breakpoints": true
     }
   ]
 }

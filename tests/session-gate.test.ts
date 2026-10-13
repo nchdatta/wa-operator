@@ -5,7 +5,7 @@ import type { ApprovalEngine, ApprovalOutcome, ApprovalRequest } from '../src/ap
 import { OwnerChat } from '../src/channels/owner-chat.js';
 import { Gate } from '../src/operator/gate.js';
 import { OwnerQuestions } from '../src/operator/output.js';
-import { OperatorSession, pickEffort } from '../src/operator/session.js';
+import { missingFile, OperatorSession, pickEffort, pickModel } from '../src/operator/session.js';
 import { TaintTracker } from '../src/operator/taint.js';
 import { toolTiers } from '../src/persistence/schema.js';
 import { Governor } from '../src/runtime/governor.js';
@@ -50,6 +50,8 @@ function setup(answer: ApprovalOutcome = { decision: 'approved' }) {
     lastProgressAt: 0,
     pendingResults: 1,
     texts: [],
+    lastProgressLabel: '',
+    overrides: new Map(),
     stopped: false,
     done: () => {},
   };
@@ -144,5 +146,43 @@ describe('PreToolUse gate', () => {
   it('effort: short questions medium, multi-step work high', () => {
     expect(pickEffort("What's today?")).toBe('medium');
     expect(pickEffort('Read the price list and then update the stock sheet')).toBe('high');
+  });
+
+  it('"Always" on a new risk-free MCP tool saves it, so it never asks again', async () => {
+    const t = setup({ decision: 'approved', remember: true });
+    await t.call('mcp__claude_ai_Gmail__search_threads', { query: 'invoice' });
+    expect(t.requests[0]?.remember).toBe('✅ Always');
+    expect(t.ctx.db.select().from(toolTiers).all()[0]?.tier).toBe('LOW');
+    await t.call('mcp__claude_ai_Gmail__search_threads', { query: 'bill' });
+    expect(t.requests).toHaveLength(1);
+  });
+
+  it('sends never get a remember button', async () => {
+    const t = setup();
+    await t.call('mcp__claude_ai_Gmail__send_message', { to: 'a@b.c' });
+    expect(t.requests[0]?.remember).toBeUndefined();
+  });
+
+  it('"Today" on a plain command allows the same command again, not chained ones', async () => {
+    const t = setup({ decision: 'approved', remember: true });
+    await t.call('PowerShell', { command: 'python report.py' });
+    expect(t.requests[0]?.remember).toBe('✅ Today');
+    expect((await t.call('PowerShell', { command: 'python report.py --month 9' })).permissionDecision).toBe('allow');
+    expect(t.requests).toHaveLength(1);
+    await t.call('PowerShell', { command: 'python report.py; python other.py' });
+    expect(t.requests).toHaveLength(2);
+    expect(t.requests[1]?.remember).toBeUndefined();
+  });
+
+  it('model: quick requests use the fast model unless it is off', () => {
+    expect(pickModel("What's today?", 'opus', 'sonnet')).toBe('sonnet');
+    expect(pickModel('Read the price list and then update the stock sheet', 'opus', 'sonnet')).toBe('opus');
+    expect(pickModel("What's today?", 'opus', 'off')).toBe('opus');
+  });
+
+  it('MCP servers whose script path is gone are detected', () => {
+    expect(missingFile({ command: 'node', args: [path.join(process.cwd(), 'nope', 'mcp.js')] })).toMatch(/mcp.js$/);
+    expect(missingFile({ command: 'npx', args: ['-y', 'some-mcp'] })).toBeNull();
+    expect(missingFile({ type: 'http', url: 'https://x.example/mcp' })).toBeNull();
   });
 });

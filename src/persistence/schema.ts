@@ -40,6 +40,8 @@ export const operatorState = sqliteTable('operator_state', {
   trusted: integer('trusted', { mode: 'boolean' }).notNull().default(false),
   /** /trust full: commands and edits run too; sends, deletes, installs, network and CRITICAL still ask. */
   fullTrust: integer('full_trust', { mode: 'boolean' }).notNull().default(false),
+  /** Last Claude rate-limit info (JSON), so a restart still knows the limit was hit. */
+  rateLimit: text('rate_limit'),
   /** Last time the owner messaged us (24-hour customer-service window). */
   lastOwnerMessageAt: integer('last_owner_message_at'),
   updatedAt: integer('updated_at').notNull(),

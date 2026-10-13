@@ -28,7 +28,7 @@ import { DENY_NAMES, defaultDenyPaths, realPath, type PathPolicy } from './paths
 import { operatorRules } from './scope.js';
 import { TaintTracker } from './taint.js';
 import { isTier, type Tier } from './tier.js';
-import { classify, stillAsksInFullTrust, suggestMcpTier } from './tiers.js';
+import { classify, stillAsksInFullTrust, suggestMcpTier, type Classification } from './tiers.js';
 
 /**
  * One warm Claude Agent SDK session per day on the owner's Claude subscription. Owner messages are
@@ -78,6 +78,10 @@ interface ActiveRun extends RunHandle {
   lastProgressAt: number;
   pendingResults: number;
   texts: string[];
+  /** Last progress line sent, so the same step is not repeated. */
+  lastProgressLabel: string;
+  /** Owner-confirmed MCP tiers, read once per task. */
+  overrides: Map<string, Tier>;
   stopped: boolean;
   done: (r: RunResult) => void;
 }
@@ -153,9 +157,31 @@ function readMcpFile(file: string): Record<string, McpServerConfig> {
  * config/mcp.json, which wins on a name clash. Claude Code's own servers, plugins, skills and claude.ai
  * connectors come in through settingSources ['user'].
  */
-export function loadImportedMcp(ctx: AppContext): Record<string, McpServerConfig> {
+export function loadImportedMcp(ctx: AppContext): { servers: Record<string, McpServerConfig>; skipped: string[] } {
   const desktop = Object.assign({}, ...desktopConfigPaths().map(readMcpFile)) as Record<string, McpServerConfig>;
-  return { ...desktop, ...readMcpFile(path.join(ctx.config.appDir, 'config', 'mcp.json')) };
+  const all = { ...desktop, ...readMcpFile(path.join(ctx.config.appDir, 'config', 'mcp.json')) };
+  const allow = ctx.config.OPERATOR_MCP_ALLOW.map((s) => s.toLowerCase());
+  const servers: Record<string, McpServerConfig> = {};
+  const skipped: string[] = [];
+  for (const [name, cfg] of Object.entries(all)) {
+    if (allow.length && !allow.includes(name.toLowerCase())) continue;
+    const missing = missingFile(cfg);
+    if (missing) {
+      skipped.push(`${name} (missing ${missing})`);
+      continue;
+    }
+    servers[name] = cfg;
+  }
+  return { servers, skipped };
+}
+
+/** A stdio server whose command or script path no longer exists (e.g. a moved project). */
+export function missingFile(cfg: McpServerConfig): string | null {
+  if (!('command' in cfg) || typeof cfg.command !== 'string') return null;
+  const args = ('args' in cfg && Array.isArray(cfg.args) ? cfg.args : []) as string[];
+  const candidates = [cfg.command, ...args.filter((a) => /\.(c|m)?js$|\.py$|\.exe$/i.test(a))];
+  for (const p of candidates) if (path.isAbsolute(p) && !fs.existsSync(p)) return p;
+  return null;
 }
 
 export function buildPathPolicy(ctx: AppContext): PathPolicy {
@@ -208,12 +234,29 @@ export function pickEffort(prompt: string): 'medium' | 'high' {
     : 'medium';
 }
 
+/** Short, simple requests go to the fast model; multi-step ones to the main model. */
+export function pickModel(prompt: string, main: string, fast: string): string {
+  return fast === 'off' || pickEffort(prompt) === 'high' ? main : fast;
+}
+
+export interface SessionInfo {
+  model: string | null;
+  startedAt: number | null;
+  failedServers: string[];
+}
+
 export class OperatorSession {
   private q: Query | null = null;
   private inbox: Inbox | null = null;
   private day: string | null = null;
   private run: ActiveRun | null = null;
   private readonly allowedToolUses = new Set<string>();
+  /** Commands the owner tapped "✅ Today" for (tool + first two words), until the session ends. */
+  private readonly rememberedCommands = new Set<string>();
+  private failedServers: string[] = [];
+  private startedAt: number | null = null;
+  private model: string | null = null;
+  private lastRunEndedAt = 0;
   private readonly policy: PathPolicy;
   private loop: Promise<void> | null = null;
 
@@ -236,6 +279,10 @@ export class OperatorSession {
     return this.run?.id ?? null;
   }
 
+  info(): SessionInfo {
+    return { model: this.model, startedAt: this.startedAt, failedServers: this.failedServers };
+  }
+
   /** Start (or keep) today's warm session. A new day starts a fresh session. */
   ensure(): void {
     const today = dayKey(this.ctx.clock.now(), this.ctx.config.BUSINESS_TIMEZONE);
@@ -245,6 +292,8 @@ export class OperatorSession {
     const saved = this.ctx.db.select().from(operatorSessions).where(eq(operatorSessions.day, today)).get();
     const resume = saved && !saved.closedAt ? saved.sessionId : undefined;
     this.day = today;
+    this.startedAt = this.ctx.clock.now();
+    this.model = this.ctx.config.OPERATOR_MODEL;
     this.inbox = new Inbox();
     this.q = query({ prompt: this.inbox, options: this.options(resume) });
     const q = this.q;
@@ -265,13 +314,16 @@ export class OperatorSession {
     if (c.CLAUDE_CODE_OAUTH_TOKEN) env.CLAUDE_CODE_OAUTH_TOKEN = c.CLAUDE_CODE_OAUTH_TOKEN;
 
     const gateHook: HookCallback = (input, toolUseID, { signal }) => this.gateHook(input, toolUseID, signal);
+    const imported = loadImportedMcp(this.ctx);
+    this.failedServers = imported.skipped;
+    if (imported.skipped.length) this.ctx.logger.warn({ skipped: imported.skipped }, 'MCP servers skipped');
     return {
       model: c.OPERATOR_MODEL,
       cwd: c.home,
       additionalDirectories: [...c.roots, c.inbox, c.outbox].filter((r) => r !== c.home),
       settingSources: ['user'],
       mcpServers: {
-        ...loadImportedMcp(this.ctx),
+        ...imported.servers,
         'whatsapp-out': createWhatsAppOutServer(this.ctx, this.chat, this.questions),
       },
       systemPrompt: { type: 'preset', preset: 'claude_code', append: operatorRules(c) },
@@ -295,7 +347,7 @@ export class OperatorSession {
     };
   }
 
-  private overrides(): Map<string, Tier> {
+  private loadOverrides(): Map<string, Tier> {
     const rows = this.ctx.db.select().from(toolTiers).where(isNotNull(toolTiers.tier)).all();
     return new Map(rows.filter((r) => r.tier && isTier(r.tier)).map((r) => [r.toolName, r.tier as Tier]));
   }
@@ -335,7 +387,7 @@ export class OperatorSession {
       policy: this.policy,
       tainted: run.taint.tainted,
       knownDomains: run.taint.knownDomains,
-      overrides: this.overrides(),
+      overrides: run.overrides,
       untrustedDirs: [this.ctx.config.inbox, path.join(process.env.USERPROFILE ?? '', 'Downloads')],
     });
     if (c.unconfirmed) this.recordSeenTool(toolName);
@@ -344,10 +396,13 @@ export class OperatorSession {
     let allowed = false;
     let reason = c.reason;
     const g = this.gate.state();
-    const fullTrustAllows =
-      g.fullTrust && c.tier === 'HIGH' && !run.taint.tainted && !stillAsksInFullTrust(toolName, c.reason);
+    const fullTrustAllows = g.fullTrust && c.tier === 'HIGH' && !run.taint.tainted && !stillAsksInFullTrust(c);
+    const memo = this.memoKey(toolName, toolInput, c, run.taint.tainted);
     if (c.tier === 'LOW' || (c.tier === 'MEDIUM' && g.trusted) || fullTrustAllows) {
       allowed = true;
+    } else if (memo?.kind === 'command' && this.rememberedCommands.has(memo.key)) {
+      allowed = true;
+      reason = 'They allowed this command for today.';
     } else if (c.tier === 'DENY') {
       audit(this.ctx, { actor: 'claude', action: 'tool.denied', outcome: 'DENY', metadata: meta });
       await this.chat.notify(
@@ -357,7 +412,15 @@ export class OperatorSession {
     } else {
       this.progressPause = true;
       const outcome = await this.approvals.request(
-        { runId: run.id, toolUseId: toolUseID ?? null, toolName, input: toolInput, tier: c.tier, reason: c.reason },
+        {
+          runId: run.id,
+          toolUseId: toolUseID ?? null,
+          toolName,
+          input: toolInput,
+          tier: c.tier,
+          reason: c.reason,
+          ...(memo ? { remember: memo.kind === 'tool' ? '✅ Always' : '✅ Today' } : {}),
+        },
         signal,
       );
       this.progressPause = false;
@@ -366,6 +429,7 @@ export class OperatorSession {
         case 'approved':
           allowed = true;
           reason = 'They approved it.';
+          if (outcome.remember && memo) this.remember(memo, toolName, run);
           break;
         case 'edit':
           return decide('deny', `They want a change before this runs: "${outcome.note}". Apply it and try again.`);
@@ -377,7 +441,7 @@ export class OperatorSession {
         case 'expired':
           return decide(
             'deny',
-            'They didn\'t tap Approve within 5 minutes, so this was not done. Tell them briefly, as "you".',
+            `They didn't tap Approve within ${Math.round(this.ctx.config.OPERATOR_APPROVAL_TTL_SECONDS / 60)} minutes, so this was not done. Tell them briefly, as "you".`,
           );
         case 'failed':
           return decide('deny', `Approval could not be requested (${outcome.error}).`);
@@ -391,6 +455,41 @@ export class OperatorSession {
   }
 
   private progressPause = false;
+
+  /**
+   * What "remember" would cover for this call, if anything: an unconfirmed MCP tool with no risk flag
+   * (saved as always allowed), or a plain risk-free command (allowed until the session ends).
+   */
+  private memoKey(
+    toolName: string,
+    input: Record<string, unknown>,
+    c: Classification,
+    tainted: boolean,
+  ): { kind: 'tool' | 'command'; key: string } | null {
+    if (tainted || (c.risks?.length ?? 0) > 0 || (c.tier !== 'HIGH' && c.tier !== 'MEDIUM')) return null;
+    if (c.unconfirmed) return c.unconfirmed.suggested === 'CRITICAL' ? null : { kind: 'tool', key: toolName };
+    if (toolName === 'Bash' || toolName === 'PowerShell') {
+      const cmd = typeof input.command === 'string' ? input.command.trim() : '';
+      if (!cmd || /[;&|`$<>\n]/.test(cmd)) return null;
+      return { kind: 'command', key: `${toolName}:${cmd.toLowerCase().split(/\s+/).slice(0, 2).join(' ')}` };
+    }
+    return null;
+  }
+
+  private remember(memo: { kind: 'tool' | 'command'; key: string }, toolName: string, run: ActiveRun): void {
+    if (memo.kind === 'command') {
+      this.rememberedCommands.add(memo.key);
+      return;
+    }
+    const now = this.ctx.clock.now();
+    this.ctx.db
+      .insert(toolTiers)
+      .values({ toolName, tier: 'LOW', suggested: suggestMcpTier(toolName), firstSeenAt: now, updatedAt: now })
+      .onConflictDoUpdate({ target: toolTiers.toolName, set: { tier: 'LOW', updatedAt: now } })
+      .run();
+    run.overrides.set(toolName, 'LOW');
+    audit(this.ctx, { actor: 'owner', action: 'tool.always_allow', target: toolName, outcome: 'LOW' });
+  }
 
   private async consume(q: Query): Promise<void> {
     try {
@@ -411,6 +510,10 @@ export class OperatorSession {
           for (const t of msg.tools)
             if (t.startsWith('mcp__') && !t.startsWith('mcp__whatsapp-out__')) this.recordSeenTool(t);
           const failed = msg.mcp_servers.filter((s) => s.status !== 'connected' && s.status !== 'pending');
+          this.failedServers = [
+            ...this.failedServers.filter((s) => s.includes('(missing')),
+            ...failed.map((s) => `${s.name} (${s.status})`),
+          ];
           if (failed.length) this.ctx.logger.warn({ servers: failed }, 'some MCP servers did not connect');
         }
         return;
@@ -422,9 +525,17 @@ export class OperatorSession {
         if (!tool) return;
         const now = this.ctx.clock.now();
         const every = this.ctx.config.OPERATOR_PROGRESS_SECONDS * 1000;
-        if (!this.progressPause && now - run.startedAt > 15_000 && now - run.lastProgressAt >= every) {
+        const label = describeTool(tool.name ?? '', (tool.input ?? {}) as Record<string, unknown>);
+        // Only report a new kind of step, at most once per interval.
+        if (
+          !this.progressPause &&
+          label !== run.lastProgressLabel &&
+          now - run.startedAt > 15_000 &&
+          now - run.lastProgressAt >= every
+        ) {
           run.lastProgressAt = now;
-          await this.chat.notify(`⏳ ${describeTool(tool.name ?? '', (tool.input ?? {}) as Record<string, unknown>)}…`);
+          run.lastProgressLabel = label;
+          await this.chat.notify(`⏳ ${label}…`);
         }
         return;
       }
@@ -468,6 +579,8 @@ export class OperatorSession {
     const run = this.run;
     if (!run) return;
     this.run = null;
+    this.lastRunEndedAt = this.ctx.clock.now();
+    this.allowedToolUses.clear();
     this.questions.cancel();
     run.done({ ...r, stopped: run.stopped, toolCalls: run.toolCalls, tainted: run.taint.tainted });
   }
@@ -475,9 +588,15 @@ export class OperatorSession {
   /** Run one owner instruction to completion (the caller guarantees one at a time). */
   async runTask(handle: RunHandle): Promise<RunResult> {
     if (this.run) throw new Error('a task is already running');
+    const now = this.ctx.clock.now();
+    const freshMs = this.ctx.config.OPERATOR_FRESH_AFTER_MIN * 60_000;
+    // A long gap since the last task: start a fresh conversation so old context doesn't slow every turn.
+    if (this.q && freshMs > 0 && this.lastRunEndedAt > 0 && now - this.lastRunEndedAt > freshMs) {
+      this.ctx.logger.info('idle gap: starting a fresh conversation');
+      this.newSession();
+    }
     this.ensure();
     const q = this.q!;
-    const now = this.ctx.clock.now();
     const result = new Promise<RunResult>((done) => {
       this.run = {
         ...handle,
@@ -487,6 +606,8 @@ export class OperatorSession {
         lastProgressAt: now,
         pendingResults: 1,
         texts: [],
+        lastProgressLabel: '',
+        overrides: this.loadOverrides(),
         stopped: false,
         done,
       };
@@ -495,6 +616,15 @@ export class OperatorSession {
       await q.applyFlagSettings({ effortLevel: pickEffort(handle.prompt) });
     } catch (e) {
       this.ctx.logger.debug({ err: errMsg(e) }, 'could not set effort');
+    }
+    const model = pickModel(handle.prompt, this.ctx.config.OPERATOR_MODEL, this.ctx.config.OPERATOR_FAST_MODEL);
+    if (model !== this.model) {
+      try {
+        await q.setModel(model);
+        this.model = model;
+      } catch (e) {
+        this.ctx.logger.debug({ err: errMsg(e) }, 'could not switch model');
+      }
     }
     this.inbox!.push(userMessage(handle.prompt));
     return result;
@@ -547,7 +677,9 @@ export class OperatorSession {
     this.q = null;
     this.inbox = null;
     this.day = null;
+    this.startedAt = null;
     this.allowedToolUses.clear();
+    this.rememberedCommands.clear();
   }
 
   async shutdown(): Promise<void> {

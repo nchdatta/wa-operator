@@ -14,7 +14,11 @@ export interface ShellAnalysis {
   reasons: string[];
   /** Talks to the network (curl, Invoke-WebRequest, ssh, …): a "send" for taint purposes. */
   network: boolean;
+  /** What kind of risk the command carries; full trust decides on these, not on the reason text. */
+  risks: RiskFlag[];
 }
+
+export type RiskFlag = 'deletes' | 'installs' | 'network' | 'outside' | 'encoded' | 'schedules' | 'sends' | 'system';
 
 type Tok = { t: 'word'; v: string; quoted: boolean } | { t: 'op'; v: string } | { t: 'block'; v: string };
 
@@ -529,12 +533,14 @@ export function analyzeShell(command: string, flavor: ShellFlavor, cwd: string, 
   const reasons: string[] = [];
   let tier: Tier = 'LOW';
   let network = false;
-  const raise = (t: Tier, why: string) => {
+  const risks = new Set<RiskFlag>();
+  const raise = (t: Tier, why: string, risk?: RiskFlag) => {
     tier = maxTier(tier, t);
     reasons.push(why);
+    if (risk) risks.add(risk);
   };
 
-  if (!command.trim()) return { tier: 'LOW', reasons: ['empty'], network };
+  if (!command.trim()) return { tier: 'LOW', reasons: ['empty'], network, risks: [] };
   if (SECRET_VARS.test(command)) raise('DENY', 'touches a secret');
   // Dumping the environment is DENY; reading one ordinary variable ($env:USERPROFILE) is just dynamic (HIGH).
   if (/\benv:(?![A-Za-z_])|env:\\?\*|\[(System\.)?Environment\]::GetEnvironmentVariables/i.test(command))
@@ -542,9 +548,9 @@ export function analyzeShell(command: string, flavor: ShellFlavor, cwd: string, 
   else if (/\[(System\.)?Environment\]/i.test(command)) raise('HIGH', 'reads environment variables');
   if (/(^|[\s'"\\/])\.env(\.\w+)?(?=$|[\s'"\\/;|&)])/i.test(command)) raise('DENY', 'touches a .env file');
   if (/-(e|ec|en|enc|enco|encod|encode|encoded|encodedc\w*)\s+[A-Za-z0-9+/=]{8,}/i.test(command))
-    raise('HIGH', 'encoded command');
+    raise('HIGH', 'encoded command', 'encoded');
   if (/frombase64string|\bdownloadstring\b|\bnet\.webclient\b/i.test(command))
-    raise('HIGH', 'decodes or downloads code');
+    raise('HIGH', 'decodes or downloads code', 'encoded');
 
   const { toks, dynamic } = lex(command, flavor);
   for (const d of new Set(dynamic)) raise('HIGH', d);
@@ -588,7 +594,7 @@ export function analyzeShell(command: string, flavor: ShellFlavor, cwd: string, 
       if (pv === 'deny') raise('DENY', `redirect touches a blocked path`);
       else if (a.v === '<') {
         if (pv === 'outside') raise('MEDIUM', 'reads outside the work folders');
-      } else raise('HIGH', 'writes a file through a redirect');
+      } else raise('HIGH', 'writes a file through a redirect', pv === 'outside' ? 'outside' : undefined);
     }
 
     const pathVerdicts = words
@@ -603,17 +609,17 @@ export function analyzeShell(command: string, flavor: ShellFlavor, cwd: string, 
     )
       raise('DENY', 'dumps environment or stored credentials');
     else if (name === 'env' && words.length === 0) raise('DENY', 'dumps environment');
-    else if (name === 'git' && (words[0]?.v ?? '').toLowerCase() === 'push') raise('CRITICAL', 'git push');
-    else if (CRITICAL.has(name)) raise('CRITICAL', `${name} changes the system`);
+    else if (name === 'git' && (words[0]?.v ?? '').toLowerCase() === 'push') raise('CRITICAL', 'git push', 'network');
+    else if (CRITICAL.has(name)) raise('CRITICAL', `${name} changes the system`, 'system');
     else if (DELETE.has(name)) {
-      if (pathVerdicts.length === 0 || outside) raise('CRITICAL', 'deletes outside the work folders');
-      else raise('HIGH', 'deletes inside the work folders');
+      if (pathVerdicts.length === 0 || outside) raise('CRITICAL', 'deletes outside the work folders', 'deletes');
+      else raise('HIGH', 'deletes inside the work folders', 'deletes');
     } else if (NETWORK.has(name)) {
       network = true;
-      raise('HIGH', `${name} uses the network`);
+      raise('HIGH', `${name} uses the network`, 'network');
     } else if (RUNS_CODE.has(name)) raise('HIGH', `${name} runs other code`);
-    else if (INSTALL.has(name)) raise('HIGH', 'installs software');
-    else if (WRITE.has(name)) raise('HIGH', `${name} changes files`);
+    else if (INSTALL.has(name)) raise('HIGH', 'installs software', 'installs');
+    else if (WRITE.has(name)) raise('HIGH', `${name} changes files`, outside ? 'outside' : undefined);
     else if (READ_ONLY.has(name)) {
       const sub = SUBCOMMANDS[name];
       const firstArg = (words[0]?.v ?? '').toLowerCase();
@@ -626,5 +632,5 @@ export function analyzeShell(command: string, flavor: ShellFlavor, cwd: string, 
     } else raise('HIGH', `unknown program ${name}`);
   }
   if (reasons.length === 0) reasons.push('read-only');
-  return { tier, reasons: [...new Set(reasons)], network };
+  return { tier, reasons: [...new Set(reasons)], network, risks: [...risks] };
 }

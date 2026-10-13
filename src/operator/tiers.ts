@@ -1,5 +1,6 @@
+import fs from 'node:fs';
 import { checkPath, type PathPolicy, type PathVerdict } from './paths.js';
-import { analyzeShell } from './shell.js';
+import { analyzeShell, type RiskFlag } from './shell.js';
 import { bump, maxTier, type Tier } from './tier.js';
 
 /**
@@ -33,6 +34,8 @@ export interface Classification {
   sends: boolean;
   /** Website this call visits, if any. */
   domain?: string;
+  /** Structured risks: full trust and "always allow" decide on these, never on the reason text. */
+  risks?: RiskFlag[];
   /** Set for an MCP tool the owner has not confirmed yet, with the suggested tier. */
   unconfirmed?: { suggested: Tier };
 }
@@ -55,6 +58,16 @@ export function domainsIn(text: string): string[] {
     if (d) out.add(d);
   }
   return [...out];
+}
+
+/** Windows marks downloaded files with a Zone.Identifier stream (Mark of the Web). */
+export function fromInternet(real: string): boolean {
+  if (process.platform !== 'win32' || !real) return false;
+  try {
+    return /ZoneId=[34]/.test(fs.readFileSync(`${real}:Zone.Identifier`, 'utf8'));
+  } catch {
+    return false;
+  }
 }
 
 function pathTier(verdict: PathVerdict, inside: Tier, outside: Tier): Tier {
@@ -113,7 +126,7 @@ function classifyRaw(toolName: string, input: Record<string, unknown>, cwd: stri
             : verdict === 'inside'
               ? 'read in work folders'
               : 'read outside work folders',
-        taints: toolName === 'Read' && untrusted(real),
+        taints: toolName === 'Read' && (untrusted(real) || fromInternet(real)),
         sends: false,
       };
     }
@@ -126,6 +139,7 @@ function classifyRaw(toolName: string, input: Record<string, unknown>, cwd: stri
       const tier = pathTier(verdict, 'MEDIUM', 'HIGH');
       return {
         tier,
+        ...(verdict === 'outside' ? { risks: ['outside' as const] } : {}),
         reason:
           tier === 'DENY'
             ? 'blocked path'
@@ -140,7 +154,13 @@ function classifyRaw(toolName: string, input: Record<string, unknown>, cwd: stri
     case 'Monitor': {
       const flavor = toolName === 'PowerShell' ? 'powershell' : 'bash';
       const a = analyzeShell(str(input.command), flavor, cwd, p);
-      return { tier: maxTier(a.tier), reason: a.reasons.join('; '), taints: a.network, sends: a.network };
+      return {
+        tier: maxTier(a.tier),
+        reason: a.reasons.join('; '),
+        taints: a.network,
+        sends: a.network,
+        risks: a.risks,
+      };
     }
     case 'WebFetch': {
       const domain = domainOf(str(input.url));
@@ -154,7 +174,7 @@ function classifyRaw(toolName: string, input: Record<string, unknown>, cwd: stri
     case 'CronDelete':
     case 'RemoteTrigger':
     case 'ScheduleWakeup':
-      return { tier: 'HIGH', reason: 'schedules work', ...none };
+      return { tier: 'HIGH', reason: 'schedules work', risks: ['schedules'], ...none };
     case 'Task':
     case 'Agent':
     case 'TodoWrite':
@@ -316,18 +336,27 @@ export function suggestMcpTier(toolName: string): Tier {
 }
 
 /**
- * Full trust still asks for these HIGH calls: anything that sends or posts, deletes, installs, or uses
- * the network from a command. Everything else HIGH (commands, scripts, edits, unknown tools) runs.
+ * What an MCP tool name says about risk. The leading verb decides first, so get_reply_count is a read
+ * and send_reply a send; only names without a read verb fall back to any matching word.
  */
-export function stillAsksInFullTrust(toolName: string, reason: string): boolean {
-  // Files and screenshots sent back to the owner's own chat are not outward.
-  if (toolName.startsWith('mcp__whatsapp-out__')) return false;
-  if (toolName.startsWith('mcp__')) {
-    const w = words(toolName.split('__').slice(2).join('_'));
-    if (w.some((x) => SEND_WORDS.includes(x)) && !w.includes('draft')) return true;
-    if (w.some((x) => DELETE_WORDS.includes(x))) return true;
-  }
-  return /delet|remov|uses the network|installs|downloads|encoded|outside|schedules/i.test(reason);
+export function mcpRisks(toolName: string): RiskFlag[] {
+  const w = words(toolName.split('__').slice(2).join('_') || toolName);
+  const verb = w[0] ?? '';
+  if (READ_WORDS.includes(verb) && verb !== 'navigate' && verb !== 'open') return [];
+  const out: RiskFlag[] = [];
+  const pick = (list: string[]) => (list.includes(verb) ? true : w.some((x) => list.includes(x)));
+  if (pick(SEND_WORDS) && !w.includes('draft')) out.push('sends');
+  if (pick(DELETE_WORDS)) out.push('deletes');
+  if (pick(CRIT_WORDS)) out.push('system');
+  return out;
+}
+
+/**
+ * Full trust still asks for HIGH calls with any risk flag: sends, deletes, installs, network commands,
+ * encoded commands, changes outside the work folders and scheduled work. Everything else HIGH runs.
+ */
+export function stillAsksInFullTrust(c: Pick<Classification, 'risks'>): boolean {
+  return (c.risks?.length ?? 0) > 0;
 }
 
 function classifyMcp(toolName: string, input: Record<string, unknown>, cwd: string, ctx: TierContext): Classification {
@@ -345,10 +374,11 @@ function classifyMcp(toolName: string, input: Record<string, unknown>, cwd: stri
     }
     return { tier: 'LOW', reason: 'reply to the owner', taints: false, sends: false };
   }
+  const risks = mcpRisks(toolName);
 
   const url = str(input.url);
   const domain = url ? domainOf(url) : undefined;
-  const sends = w.some((x) => SEND_WORDS.includes(x)) && !w.includes('draft');
+  const sends = risks.includes('sends');
   const reads = w.some((x) => READ_WORDS.includes(x));
   const taints = reads && TAINT_HINT.test(toolName);
 
@@ -366,6 +396,7 @@ function classifyMcp(toolName: string, input: Record<string, unknown>, cwd: stri
       reason: `owner-confirmed tier for ${tool}`,
       taints,
       sends,
+      risks,
       ...(domain ? { domain } : {}),
     };
   }
@@ -375,6 +406,7 @@ function classifyMcp(toolName: string, input: Record<string, unknown>, cwd: stri
     reason: `new tool ${tool} (suggested ${suggested}; confirm on the PC with "wa-operator tiers")`,
     taints,
     sends,
+    risks,
     unconfirmed: { suggested },
     ...(domain ? { domain } : {}),
   };
