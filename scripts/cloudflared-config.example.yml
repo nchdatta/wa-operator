@@ -1,0 +1,14 @@
+# Named Cloudflare tunnel on the owner's own domain. The quick trycloudflare.com URL changes on
+# every restart and Meta stops delivering, so a named tunnel is required before launch.
+#   cloudflared tunnel login
+#   cloudflared tunnel create wa-operator
+#   cloudflared tunnel route dns wa-operator ops.example.com
+#   cloudflared service install      (runs the tunnel as a Windows service)
+# Only the webhook and the liveness check are exposed.
+tunnel: wa-operator
+credentials-file: C:\Users\<you>\.cloudflared\<tunnel-id>.json
+ingress:
+  - hostname: ops.example.com
+    path: ^/(webhooks/whatsapp|health/live)$
+    service: http://127.0.0.1:3100
+  - service: http_status:404

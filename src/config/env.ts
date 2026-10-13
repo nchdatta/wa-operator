@@ -1,0 +1,196 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { parse as parseDotenv } from 'dotenv';
+import { z } from 'zod';
+import { SECRET_NAMES, readSecrets } from '../security/secrets.js';
+
+const bool = z
+  .enum(['true', 'false', '1', '0', 'yes', 'no'])
+  .transform((v) => v === 'true' || v === '1' || v === 'yes');
+const int = (min: number, max: number) => z.coerce.number().int().min(min).max(max);
+const csv = z.string().transform((v) =>
+  v
+    .split(/[,;]/)
+    .map((s) => s.trim())
+    .filter(Boolean),
+);
+const digits = z.string().regex(/^\d+$/, 'must be numeric');
+
+const EnvSchema = z
+  .object({
+    /** Which chat app the owner uses. Telegram is the one-setting fallback if Meta's AI policy tightens. */
+    CHANNEL: z.enum(['whatsapp', 'telegram']).default('whatsapp'),
+
+    // The one user
+    /** The owner's personal WhatsApp number (wa_id: country code + number, digits only). */
+    OPERATOR_WA_ID: z
+      .string()
+      .regex(/^\d{7,15}$/, 'digits only, e.g. 8801712345678')
+      .optional(),
+    OPERATOR_ENABLED: bool.default(true),
+    /** Optional argon2 hash; normally set with `wa-operator set-pin` and kept in the database. */
+    OPERATOR_PIN_HASH: z.string().startsWith('$argon2').optional(),
+    /** Folders Claude may change files in. Reads outside them need a tap. */
+    OPERATOR_ROOTS: csv.pipe(z.array(z.string()).min(1, 'set at least one work folder')),
+    /** Claude's working directory. Defaults to the first root. */
+    OPERATOR_HOME: z.string().optional(),
+    /** Where photos and PDFs from the owner are saved. Defaults to <home>/Operator Inbox. */
+    OPERATOR_INBOX: z.string().optional(),
+    /** Where Claude puts files it sends back. Defaults to <home>/Operator Outbox. */
+    OPERATOR_OUTBOX: z.string().optional(),
+    OPERATOR_IDLE_MIN: int(1, 24 * 60).default(30),
+    OPERATOR_MODEL: z.string().min(1).max(80).default('opus'),
+    OPERATOR_MAX_TURNS: int(1, 500).default(40),
+    OPERATOR_APPROVAL_TTL_SECONDS: int(30, 3600).default(300),
+    OPERATOR_PROGRESS_SECONDS: int(5, 600).default(30),
+    /** Extra paths that are always blocked (comma separated). */
+    OPERATOR_EXTRA_DENY: csv.default([]),
+    /** Operator Mode refuses to run elevated unless this is set. */
+    OPERATOR_ALLOW_ADMIN: bool.default(false),
+    /** WhatsApp Flow with a password field, used for the PIN (config/flows/pin-flow.json). */
+    OPERATOR_PIN_FLOW_ID: digits.optional(),
+    /** draft = send the unpublished Flow (testing, or until the business passes Meta's integrity check). */
+    OPERATOR_PIN_FLOW_MODE: z.enum(['published', 'draft', 'text']).default('published'),
+    /** Utility template used when a result is ready after the 24-hour window closed. */
+    OPERATOR_REPLY_TEMPLATE: z
+      .string()
+      .regex(/^[a-z0-9_]+$/)
+      .optional(),
+    OPERATOR_REPLY_TEMPLATE_LANG: z.string().default('en'),
+    /** Optional whisper.cpp server (e.g. http://127.0.0.1:8178) for real voice notes. */
+    WHISPER_URL: z.url().optional(),
+
+    // Business (scope guard)
+    BUSINESS_NAME: z.string().min(1).max(100).default('the business'),
+    BUSINESS_DESCRIPTION: z.string().max(500).default(''),
+    BUSINESS_TIMEZONE: z.string().default('Asia/Dhaka'),
+
+    // Claude subscription (from `claude setup-token`; kept in Windows Credential Manager)
+    CLAUDE_CODE_OAUTH_TOKEN: z.string().min(20).optional(),
+
+    // WhatsApp Cloud API
+    META_APP_SECRET: z.string().min(16).optional(),
+    META_VERIFY_TOKEN: z.string().min(32, 'use a random value of at least 32 characters').optional(),
+    META_APPSECRET_PROOF: bool.default(true),
+    WHATSAPP_ACCESS_TOKEN: z.string().min(20).optional(),
+    WHATSAPP_PHONE_NUMBER_ID: digits.optional(),
+    WHATSAPP_BUSINESS_ACCOUNT_ID: digits.optional(),
+    META_APP_ID: digits.optional(),
+    /**
+     * quick = free trycloudflare.com tunnel started by the service; its URL changes on every start, so the
+     * webhook is re-registered automatically. named = your own stable hostname (PUBLIC_HOSTNAME). none = bring your own.
+     */
+    TUNNEL_MODE: z.enum(['quick', 'named', 'none']).default('none'),
+    PUBLIC_HOSTNAME: z.string().optional(),
+    /** Path to cloudflared.exe if it is not on PATH. */
+    CLOUDFLARED_BIN: z.string().optional(),
+    WHATSAPP_API_VERSION: z
+      .string()
+      .regex(/^v\d+\.\d+$/, 'format vNN.N')
+      .default('v24.0'),
+    WHATSAPP_GRAPH_BASE_URL: z.url().default('https://graph.facebook.com'),
+
+    // Telegram fallback
+    TELEGRAM_BOT_TOKEN: z.string().min(20).optional(),
+    TELEGRAM_OPERATOR_USER_ID: digits.optional(),
+    TELEGRAM_API_BASE_URL: z.url().default('https://api.telegram.org'),
+
+    // Storage and service
+    DATA_DIR: z.string().default('./data'),
+    MEDIA_MAX_BYTES: int(1, 100 * 1024 * 1024).default(25 * 1024 * 1024),
+    WEBHOOK_HOST: z.string().default('127.0.0.1'),
+    WEBHOOK_PORT: int(1, 65535).default(3100),
+    WEBHOOK_PATH: z.string().startsWith('/').default('/webhooks/whatsapp'),
+
+    LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
+    LOG_FILE: z.string().optional(),
+  })
+  .superRefine((v, ctx) => {
+    const need = (keys: (keyof typeof v)[], why: string) => {
+      for (const k of keys) if (!v[k]) ctx.addIssue({ code: 'custom', path: [k], message: `required ${why}` });
+    };
+    if (v.CHANNEL === 'whatsapp') {
+      need(
+        ['OPERATOR_WA_ID', 'META_APP_SECRET', 'META_VERIFY_TOKEN', 'WHATSAPP_ACCESS_TOKEN', 'WHATSAPP_PHONE_NUMBER_ID'],
+        'when CHANNEL=whatsapp',
+      );
+    } else {
+      need(['TELEGRAM_BOT_TOKEN', 'TELEGRAM_OPERATOR_USER_ID'], 'when CHANNEL=telegram');
+    }
+  });
+
+export type RawEnv = z.infer<typeof EnvSchema>;
+
+export interface Config extends RawEnv {
+  baseDir: string;
+  /** Install folder of this app (always blocked for Claude). */
+  appDir: string;
+  dataDir: string;
+  databasePath: string;
+  logFile: string | undefined;
+  roots: string[];
+  home: string;
+  inbox: string;
+  outbox: string;
+  graphBaseUrl: string;
+}
+
+export class ConfigError extends Error {
+  constructor(public readonly issues: string[]) {
+    super(`Invalid configuration:\n  - ${issues.join('\n  - ')}`);
+    this.name = 'ConfigError';
+  }
+}
+
+/** Expand ~ and %VAR% so roots can be written the way people type them. */
+export function expandPath(p: string, baseDir: string): string {
+  let out = p.trim().replace(/^~(?=$|[\\/])/, os.homedir());
+  out = out.replace(/%([A-Za-z_][A-Za-z0-9_]*)%/g, (m, name: string) => process.env[name] ?? m);
+  return path.isAbsolute(out) ? path.normalize(out) : path.resolve(baseDir, out);
+}
+
+/** Build a validated, frozen config from an env-like record. Pure apart from path expansion. */
+export function buildConfig(env: Record<string, string | undefined>, baseDir: string, appDir = baseDir): Config {
+  const cleaned = Object.fromEntries(Object.entries(env).filter(([, v]) => v !== undefined && v !== ''));
+  const parsed = EnvSchema.safeParse(cleaned);
+  if (!parsed.success) {
+    throw new ConfigError(parsed.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`));
+  }
+  const raw = parsed.data;
+  const resolve = (p: string) => expandPath(p, baseDir);
+  const roots = raw.OPERATOR_ROOTS.map(resolve);
+  const home = raw.OPERATOR_HOME ? resolve(raw.OPERATOR_HOME) : roots[0]!;
+  const dataDir = resolve(raw.DATA_DIR);
+  return Object.freeze({
+    ...raw,
+    baseDir,
+    appDir,
+    dataDir,
+    databasePath: path.join(dataDir, 'operator.db'),
+    logFile: raw.LOG_FILE ? resolve(raw.LOG_FILE) : undefined,
+    roots,
+    home,
+    inbox: raw.OPERATOR_INBOX ? resolve(raw.OPERATOR_INBOX) : path.join(home, 'Operator Inbox'),
+    outbox: raw.OPERATOR_OUTBOX ? resolve(raw.OPERATOR_OUTBOX) : path.join(home, 'Operator Outbox'),
+    graphBaseUrl: `${raw.WHATSAPP_GRAPH_BASE_URL.replace(/\/$/, '')}/${raw.WHATSAPP_API_VERSION}`,
+  });
+}
+
+/**
+ * Load config from `DOTENV_CONFIG_PATH` (or `./.env`), then real environment variables, then secrets
+ * from Windows Credential Manager (which win, so tokens never need to sit in `.env`).
+ */
+export function loadConfig(opts: { secrets?: boolean } = {}): Config {
+  const envPath = path.resolve(process.env.DOTENV_CONFIG_PATH ?? '.env');
+  const fileVars = fs.existsSync(envPath) ? parseDotenv(fs.readFileSync(envPath)) : {};
+  const baseDir = fs.existsSync(envPath) ? path.dirname(envPath) : process.cwd();
+  const secrets = opts.secrets === false ? {} : readSecrets(SECRET_NAMES);
+  return buildConfig({ ...fileVars, ...process.env, ...secrets }, baseDir, appRoot());
+}
+
+/** The folder holding package.json, from both src/ (tsx) and dist/ (built). */
+export function appRoot(): string {
+  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+}

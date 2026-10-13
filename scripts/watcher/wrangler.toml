@@ -1,0 +1,19 @@
+name = "wa-operator-watcher"
+main = "worker.js"
+compatibility_date = "2026-09-01"
+
+[triggers]
+crons = ["*/5 * * * *"]
+
+[[kv_namespaces]]
+binding = "WATCH"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+[vars]
+HEALTH_URL = "https://ops.example.com/health/live"
+PHONE_NUMBER_ID = "REPLACE"
+OWNER_WA_ID = "8801700000000"
+OFFLINE_TEMPLATE = "operator_pc_offline"
+ONLINE_TEMPLATE = "operator_pc_online"
+TEMPLATE_LANG = "en"
+# Secret: npx wrangler secret put WHATSAPP_ACCESS_TOKEN

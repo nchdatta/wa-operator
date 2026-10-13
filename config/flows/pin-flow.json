@@ -1,0 +1,38 @@
+{
+  "version": "6.3",
+  "screens": [
+    {
+      "id": "PIN",
+      "title": "Operator PIN",
+      "terminal": true,
+      "success": true,
+      "data": {},
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "TextBody",
+            "text": "Enter your Operator Mode PIN. It is checked on the shop PC and never shown in the chat."
+          },
+          {
+            "type": "TextInput",
+            "name": "pin",
+            "label": "PIN",
+            "input-type": "password",
+            "required": true,
+            "min-chars": 4,
+            "max-chars": 12
+          },
+          {
+            "type": "Footer",
+            "label": "Submit",
+            "on-click-action": {
+              "name": "complete",
+              "payload": { "pin": "${form.pin}" }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
