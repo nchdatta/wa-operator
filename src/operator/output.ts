@@ -42,22 +42,31 @@ export function captureScreen(file: string): Promise<{ ok: true; title: string }
   return new Promise((resolve) => {
     const p = spawn(
       'powershell.exe',
-      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', '-'],
+      // Not -Command - : PowerShell reads stdin line by line and silently drops the here-string.
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-EncodedCommand',
+        Buffer.from(SCREENSHOT_PS, 'utf16le').toString('base64'),
+      ],
       {
         windowsHide: true,
         env: { ...process.env, WAOP_SHOT: file, WAOP_SENSITIVE: SENSITIVE_WINDOW.source },
       },
     );
     let out = '';
+    let err = '';
     p.stdout.on('data', (d: Buffer) => (out += d.toString('utf8')));
+    p.stderr.on('data', (d: Buffer) => (err += d.toString('utf8')));
     p.on('error', (e) => resolve({ ok: false, reason: e.message }));
     p.on('close', (code) => {
       if (code === 0 && out.startsWith('OK:')) resolve({ ok: true, title: out.slice(3) });
       else if (code === 3)
         resolve({ ok: false, reason: 'a banking or password window is in front, so no screenshot was taken' });
-      else resolve({ ok: false, reason: `screen capture failed (exit ${code})` });
+      else resolve({ ok: false, reason: `screen capture failed (exit ${code}) ${err.trim().slice(0, 200)}`.trim() });
     });
-    p.stdin.end(SCREENSHOT_PS);
   });
 }
 
@@ -129,7 +138,7 @@ export function createWhatsAppOutServer(ctx: AppContext, chat: OwnerChat, questi
         outcome: 'ok',
         metadata: { file: path.basename(args.path), bytes: stat.size },
       });
-      return ok(`Sent ${path.basename(args.path)} to the owner.`);
+      return ok(`Sent ${path.basename(args.path)} to their phone.`);
     } catch (e) {
       return fail(`Could not send: ${errMsg(e)}`);
     }
@@ -194,8 +203,8 @@ export function createWhatsAppOutServer(ctx: AppContext, chat: OwnerChat, questi
             } else await chat.say(`❓ ${args.question}`);
           });
           return answer === null
-            ? fail('The owner did not answer in time. Choose a safe default or stop.')
-            : ok(`Owner answered: ${answer}`);
+            ? fail('No answer in time. Choose a safe default or stop.')
+            : ok(`They answered: ${answer}`);
         },
       ),
     ],

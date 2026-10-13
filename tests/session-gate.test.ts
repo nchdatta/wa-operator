@@ -110,7 +110,7 @@ describe('PreToolUse gate', () => {
     const t = setup({ decision: 'expired' });
     const r = await t.call('Bash', { command: 'npm install' });
     expect(r.permissionDecision).toBe('deny');
-    expect(r.permissionDecisionReason).toMatch(/didn't answer/);
+    expect(r.permissionDecisionReason).toMatch(/didn't tap Approve/);
     const t2 = setup({ decision: 'edit', note: '250 pieces' });
     expect((await t2.call('Bash', { command: 'npm install' })).permissionDecisionReason).toMatch(/250 pieces/);
   });

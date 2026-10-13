@@ -7,6 +7,7 @@ import { InboundMessage, MessagesValue, type WebhookPayload } from '../meta/webh
 import type { Logger } from '../observability/logger.js';
 import { truncate } from '../security/redact.js';
 import { HOUR } from '../shared/clock.js';
+import { errMsg } from '../shared/errors.js';
 import type { Button, Channel, ListRow, MediaKind, OwnerMessage } from './channel.js';
 import { mimeFor } from './mime.js';
 
@@ -99,6 +100,7 @@ export class WhatsAppChannel implements Channel {
   }
 
   /** Text-reply PIN mode (used while Meta blocks Flows for an unverified business). */
+  private flowBlocked = false;
   private textPin: { token: string; at: number; promptId: string | null } | null = null;
 
   takeTextPin(text: string, replyToId?: string): string | null {
@@ -111,32 +113,38 @@ export class WhatsAppChannel implements Channel {
   }
 
   async requestPin(token: string, prompt: string): Promise<void> {
-    if (this.config.OPERATOR_PIN_FLOW_MODE === 'text') {
+    const flowId = this.config.OPERATOR_PIN_FLOW_ID;
+    if (this.config.OPERATOR_PIN_FLOW_MODE === 'text' || !flowId || this.flowBlocked) {
       const id = await this.sendText(`${prompt}\n\nReply with your PIN, then long-press your message → Delete for me.`);
       this.textPin = { token, at: Date.now(), promptId: id };
       return;
     }
-    const flowId = this.config.OPERATOR_PIN_FLOW_ID;
-    if (!flowId) throw new Error('OPERATOR_PIN_FLOW_ID is not set; publish config/flows/pin-flow.json first.');
-    await this.send({
-      type: 'interactive',
-      interactive: {
-        type: 'flow',
-        body: { text: truncate(prompt, 1024) },
-        action: {
-          name: 'flow',
-          parameters: {
-            flow_message_version: '3',
-            flow_token: token,
-            flow_id: flowId,
-            flow_cta: 'Enter PIN',
-            flow_action: 'navigate',
-            flow_action_payload: { screen: 'PIN' },
-            ...(this.config.OPERATOR_PIN_FLOW_MODE === 'draft' ? { mode: 'draft' } : {}),
+    try {
+      await this.send({
+        type: 'interactive',
+        interactive: {
+          type: 'flow',
+          body: { text: truncate(prompt, 1024) },
+          action: {
+            name: 'flow',
+            parameters: {
+              flow_message_version: '3',
+              flow_token: token,
+              flow_id: flowId,
+              flow_cta: 'Enter PIN',
+              flow_action: 'navigate',
+              flow_action_payload: { screen: 'PIN' },
+              ...(this.config.OPERATOR_PIN_FLOW_MODE === 'draft' ? { mode: 'draft' } : {}),
+            },
           },
         },
-      },
-    });
+      });
+    } catch (e) {
+      // Meta blocks Flows (even drafts) for an unverified business: fall back to a text PIN until restart.
+      if (!/139000|Integrity/i.test(errMsg(e))) throw e;
+      this.flowBlocked = true;
+      return this.requestPin(token, prompt);
+    }
   }
 
   async react(messageId: string, emoji: string): Promise<void> {

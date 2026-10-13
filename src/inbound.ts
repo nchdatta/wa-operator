@@ -148,7 +148,7 @@ export class Inbound {
         await chat.say(`🎙️ I heard: "${truncate(heard, 600)}"`, { replyTo: m.id, format: false });
         return heard;
       }
-      const caption = m.media.caption?.trim() || `The owner sent a ${m.media.kind === 'image' ? 'photo' : 'file'}.`;
+      const caption = m.media.caption?.trim() || `I sent a ${m.media.kind === 'image' ? 'photo' : 'file'}.`;
       return `${caption}\n\n[Attached ${m.media.kind} saved at: ${file}]`;
     }
     await chat.say('I can read text, photos, PDFs and documents. That kind of message is not supported.');

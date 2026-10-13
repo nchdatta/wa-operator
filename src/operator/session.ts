@@ -365,17 +365,20 @@ export class OperatorSession {
       switch (outcome.decision) {
         case 'approved':
           allowed = true;
-          reason = 'Approved by the owner.';
+          reason = 'They approved it.';
           break;
         case 'edit':
+          return decide('deny', `They want a change before this runs: "${outcome.note}". Apply it and try again.`);
+        case 'rejected':
           return decide(
             'deny',
-            `The owner wants a change before this runs: "${outcome.note}". Apply it and try again.`,
+            'They tapped Cancel, so this was not done. Do not try to do it another way. Acknowledge it in a few words, speaking to them as "you" (e.g. "OK, I didn\'t send it.").',
           );
-        case 'rejected':
-          return decide('deny', 'The owner cancelled this action. Do not try to do it another way.');
         case 'expired':
-          return decide('deny', "The owner didn't answer within 5 minutes, so this was not done. Tell them briefly.");
+          return decide(
+            'deny',
+            'They didn\'t tap Approve within 5 minutes, so this was not done. Tell them briefly, as "you".',
+          );
         case 'failed':
           return decide('deny', `Approval could not be requested (${outcome.error}).`);
       }

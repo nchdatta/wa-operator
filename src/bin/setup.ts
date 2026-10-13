@@ -262,10 +262,10 @@ const steps: Record<Step, () => Promise<void>> = {
       await c.request({ method: 'POST', path: `/${id}/publish` });
       setEnv({ OPERATOR_PIN_FLOW_MODE: 'published' });
     } catch (err) {
-      // Unverified businesses cannot publish Flows ("Blocked by Integrity"); a draft Flow can still be sent.
-      setEnv({ OPERATOR_PIN_FLOW_ID: id, OPERATOR_PIN_FLOW_MODE: 'draft' });
+      // Unverified businesses cannot publish or even send draft Flows ("Blocked by Integrity"): use the text PIN.
+      setEnv({ OPERATOR_PIN_FLOW_ID: id, OPERATOR_PIN_FLOW_MODE: 'text' });
       log.warn(
-        `could not publish (${err instanceof Error ? err.message : String(err)}); using the Flow as a draft. Re-run this step after business verification.`,
+        `could not publish (${err instanceof Error ? err.message : String(err)}); using the text PIN for now. Re-run this step after business verification.`,
       );
       return;
     }
