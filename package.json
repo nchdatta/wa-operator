@@ -22,7 +22,8 @@
     "cli": "tsx src/bin/cli.ts",
     "db:generate": "drizzle-kit generate",
     "format": "prettier --write .",
-    "setup": "tsx src/bin/setup.ts"
+    "setup": "tsx src/bin/setup.ts",
+    "uninstall": "tsx src/bin/uninstall.ts"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.296",

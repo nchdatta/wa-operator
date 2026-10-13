@@ -2,6 +2,8 @@
 
 ## Fast path: the wizard
 
+Double-click **install.cmd**. If Node 24 or cloudflared is missing, it installs them with winget. Then it runs `npm install` and starts the wizard. It does the same as:
+
 ```powershell
 cd operator-mode
 npm install
@@ -115,7 +117,7 @@ npm run cli -- tiers set mcp__claude_ai_Gmail__search_threads LOW
 ## 5. Always reachable
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\install-autostart.ps1
+npm run setup -- --only autostart
 ```
 
 This starts Operator Mode at logon in the owner's session, so GUI apps and screenshots work. It runs without admin rights and restarts on failure. It also turns off sleep on mains power.
@@ -159,3 +161,17 @@ Then set `WHISPER_URL=http://127.0.0.1:8178`. Each transcript is echoed back as 
 ## Quarterly check
 
 Re-read Meta's WhatsApp Business Solution Terms every quarter. If they tighten against internal AI tools, switch to Telegram.
+
+## Uninstall
+
+| Command | What it does |
+|---|---|
+| `uninstall.cmd` (same as `npm run uninstall`) | Stops the service and removes the scheduled tasks. Clears the webhook override; the app stays subscribed, so whatsapp-mcp keeps working. Deletes the `wa-operator:*` secrets. Keeps `.env` and `data/`, so `install.cmd` brings everything back. |
+| `uninstall.cmd --purge` | Also deletes `.env`, `data/` (PIN, history, tool tiers), `logs/`, `dist/` and `node_modules`. After that you can delete the folder. |
+| `--keep-secrets` | Keeps the secrets, so a reinstall is quick. |
+| `--yes` | Runs without asking. |
+
+Not undone, change these by hand if needed:
+- Sleep settings: `powercfg /change standby-timeout-ac 30`
+- Autologon: open Sysinternals Autologon and click Disable
+- The PIN Flow and the template stay in WhatsApp Manager

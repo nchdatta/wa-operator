@@ -28,7 +28,7 @@ export default tseslint.config(
     rules: { '@typescript-eslint/no-explicit-any': 'off' },
   },
   {
-    files: ['src/bin/cli.ts'],
+    files: ['src/bin/cli.ts', 'src/bin/uninstall.ts'],
     rules: { 'no-console': 'off' },
   },
 );
