@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { parse as parseDotenv } from 'dotenv';
-import { appRoot } from '../config/env.js';
+import { appRoot, CHANNEL_ALIASES } from '../config/env.js';
 import { MetaClient } from '../meta/client.js';
 import { silentLogger } from '../observability/logger.js';
 import { installAutostart, TUNNEL_NAME } from '../platform/autostart.js';
@@ -64,6 +64,12 @@ function readEnv(): Record<string, string> {
 }
 
 /** Set keys in .env, keeping comments and other lines. */
+/** CHANNEL as the app reads it (linked → baileys, cloud → whatsapp). */
+function channel(): string {
+  const v = (readEnv().CHANNEL ?? 'cloud').trim().toLowerCase();
+  return CHANNEL_ALIASES[v] ?? v;
+}
+
 function setEnv(values: Record<string, string>): void {
   const src = fs.existsSync(ENV_PATH)
     ? fs.readFileSync(ENV_PATH, 'utf8')
@@ -144,8 +150,8 @@ const steps: Record<Step, () => Promise<void>> = {
     const home = os.homedir();
     setEnv({
       CHANNEL: await ask(
-        'Chat app: whatsapp (Meta Cloud API), baileys (linked device, no Meta) or telegram',
-        e.CHANNEL ?? 'whatsapp',
+        'How the owner talks to the PC: linked (spare WhatsApp number as a linked device, easiest), cloud (WhatsApp Business Cloud API from Meta) or telegram',
+        ({ baileys: 'linked', whatsapp: 'cloud' } as Record<string, string>)[e.CHANNEL ?? ''] ?? e.CHANNEL ?? 'linked',
       ),
       OPERATOR_WA_ID: (
         await ask("Owner's personal WhatsApp number (country code, digits only)", e.OPERATOR_WA_ID)
@@ -164,7 +170,7 @@ const steps: Record<Step, () => Promise<void>> = {
       BUSINESS_TIMEZONE: await ask('Time zone', e.BUSINESS_TIMEZONE ?? 'Asia/Dhaka'),
     });
     for (const r of readEnv().OPERATOR_ROOTS!.split(',')) fs.mkdirSync(r.trim(), { recursive: true });
-    if (readEnv().CHANNEL === 'telegram') {
+    if (channel() === 'telegram') {
       await secret('TELEGRAM_BOT_TOKEN', 'Telegram bot token from @BotFather');
       setEnv({
         TELEGRAM_OPERATOR_USER_ID: await ask(
@@ -191,7 +197,7 @@ const steps: Record<Step, () => Promise<void>> = {
   },
 
   async meta() {
-    if (readEnv().CHANNEL !== 'whatsapp') return;
+    if (channel() !== 'whatsapp') return;
     log.step('WhatsApp Cloud API');
     console.log('  Needs: App ID, App secret, WhatsApp Business Account ID and a System User token');
     console.log(
@@ -246,7 +252,7 @@ const steps: Record<Step, () => Promise<void>> = {
   },
 
   async baileys() {
-    if (readEnv().CHANNEL !== 'baileys') return;
+    if (channel() !== 'baileys') return;
     log.step('Link the Operator WhatsApp number (Baileys)');
     log.warn('Unofficial WhatsApp Web link: use a spare number, never the business number. It can be banned.');
     if (!run('node', ['dist/bin/cli.js', 'baileys', 'link']).ok)
@@ -255,7 +261,7 @@ const steps: Record<Step, () => Promise<void>> = {
   },
 
   async flow() {
-    if (readEnv().CHANNEL !== 'whatsapp') return;
+    if (channel() !== 'whatsapp') return;
     log.step('PIN Flow');
     const e = readEnv();
     if (
@@ -295,7 +301,7 @@ const steps: Record<Step, () => Promise<void>> = {
   },
 
   async templates() {
-    if (readEnv().CHANNEL !== 'whatsapp') return;
+    if (channel() !== 'whatsapp') return;
     log.step('Message templates (for when the 24-hour window is closed)');
     const e = readEnv();
     const lang = e.OPERATOR_REPLY_TEMPLATE_LANG ?? 'en';
@@ -374,7 +380,7 @@ const steps: Record<Step, () => Promise<void>> = {
   },
 
   async tunnel() {
-    if (readEnv().CHANNEL !== 'whatsapp') return;
+    if (channel() !== 'whatsapp') return;
     log.step('Cloudflare tunnel (public URL for the webhook)');
     console.log('  1. quick  - free trycloudflare.com URL, no domain needed. Changes on every restart;');
     console.log('              the service re-registers the webhook automatically each time.');
@@ -468,7 +474,7 @@ const steps: Record<Step, () => Promise<void>> = {
   },
 
   async webhook() {
-    if (readEnv().CHANNEL !== 'whatsapp') return;
+    if (channel() !== 'whatsapp') return;
     log.step('Webhook (per-account override, other projects on the same app keep theirs)');
     const e = readEnv();
     const port = e.WEBHOOK_PORT ?? '3100';
@@ -530,7 +536,7 @@ const steps: Record<Step, () => Promise<void>> = {
   },
 
   async watcher() {
-    if (readEnv().CHANNEL !== 'whatsapp') return;
+    if (channel() !== 'whatsapp') return;
     log.step('Cloud watcher (Cloudflare Worker, free)');
     if (readEnv().TUNNEL_MODE !== 'named') {
       log.warn('skipped: the watcher needs a stable URL (named tunnel). The quick URL changes on every restart.');

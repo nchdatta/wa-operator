@@ -161,13 +161,13 @@ Everything Operator Mode stores is encrypted at rest:
 
 The key (`OPERATOR_DATA_KEY`) is made on first start and kept in the system secret store, never next to the data. Older unencrypted files are encrypted automatically on first start. If the key is lost (Windows reinstall, `secret delete`), the old data cannot be read: delete `data/` and set the PIN again. `npm run uninstall` keeps the key unless `--purge` also deletes the data.
 
-## Baileys: WhatsApp without Meta
+## Linked device: WhatsApp without Meta
 
-`CHANNEL=baileys` connects the Operator number as a **linked device** (like WhatsApp Web) through [Baileys](https://github.com/WhiskeySockets/Baileys). No Meta app, access token, webhook, tunnel, Flow or template, and no 24-hour window.
+`CHANNEL=linked` (older name: `baileys`) connects the Operator number as a **linked device** (like WhatsApp Web) through [Baileys](https://github.com/WhiskeySockets/Baileys). No Meta app, access token, webhook, tunnel, Flow or template, and no 24-hour window.
 
 > **Warning:** this is not an official WhatsApp API and breaks WhatsApp's terms. The number can be banned. Use a spare number, never the business number.
 
-1. Put a spare number's WhatsApp on a phone. Set `CHANNEL=baileys` and `OPERATOR_WA_ID` (the owner's personal number) in `.env`.
+1. Put a spare number's WhatsApp on a phone. Set `CHANNEL=linked` and `OPERATOR_WA_ID` (the owner's personal number) in `.env`.
 2. Stop the service (`npm stop`), then run `npm run cli -- baileys link` and scan the QR from that phone: **Settings → Linked devices → Link a device**. Or `npm run cli -- baileys link --pair 8801XXXXXXXXX` (the spare number) for an 8-character code.
 3. `npm start`. Message the spare number from the owner's phone.
 

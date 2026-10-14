@@ -18,10 +18,18 @@ const csv = z.string().transform((v) =>
 );
 const digits = z.string().regex(/^\d+$/, 'must be numeric');
 
+/** Friendly CHANNEL names → channel IDs. */
+export const CHANNEL_ALIASES: Record<string, 'whatsapp' | 'baileys'> = { linked: 'baileys', cloud: 'whatsapp' };
+
 const EnvSchema = z
   .object({
     /** Which chat app the owner uses. Telegram is the one-setting fallback if Meta's AI policy tightens. */
-    CHANNEL: z.enum(['whatsapp', 'telegram', 'baileys']).default('whatsapp'),
+    // Setting names: linked (WhatsApp linked device), cloud (Meta Cloud API), telegram. The older
+    // names baileys and whatsapp still work; inside the app they stay the channel IDs.
+    CHANNEL: z.preprocess(
+      (v) => (typeof v === 'string' ? (CHANNEL_ALIASES[v.trim().toLowerCase()] ?? v.trim().toLowerCase()) : v),
+      z.enum(['whatsapp', 'telegram', 'baileys']).default('whatsapp'),
+    ),
 
     // The one user
     /** The owner's personal WhatsApp number (wa_id: country code + number, digits only). */
@@ -140,10 +148,10 @@ const EnvSchema = z
     if (v.CHANNEL === 'whatsapp') {
       need(
         ['OPERATOR_WA_ID', 'META_APP_SECRET', 'META_VERIFY_TOKEN', 'WHATSAPP_ACCESS_TOKEN', 'WHATSAPP_PHONE_NUMBER_ID'],
-        'when CHANNEL=whatsapp',
+        'when CHANNEL=cloud',
       );
     } else if (v.CHANNEL === 'baileys') {
-      need(['OPERATOR_WA_ID'], 'when CHANNEL=baileys');
+      need(['OPERATOR_WA_ID'], 'when CHANNEL=linked');
     } else {
       need(['TELEGRAM_BOT_TOKEN', 'TELEGRAM_OPERATOR_USER_ID'], 'when CHANNEL=telegram');
     }
