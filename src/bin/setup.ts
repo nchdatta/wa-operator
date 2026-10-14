@@ -15,7 +15,7 @@ import { readSecrets, SECRET_NAMES, secretStoreName, writeSecret, type SecretNam
 import { ask, askHidden, confirm } from '../shared/prompt.js';
 
 /**
- * One-shot setup wizard for Windows, macOS and Linux. Run it at the shop PC as the normal user
+ * One-shot setup wizard for Windows, macOS and Linux. Run it at the business PC as the normal user
  * (not admin or root):
  *   npm run setup                    every step
  *   npm run setup -- --only meta     just some steps (comma separated)
@@ -299,9 +299,9 @@ const steps: Record<Step, () => Promise<void>> = {
     const e = readEnv();
     const lang = e.OPERATOR_REPLY_TEMPLATE_LANG ?? 'en';
     const list: [string, string][] = [
-      ['operator_result_ready', 'Your task on the shop PC has a result. Reply to this message to see it.'],
-      ['operator_pc_offline', 'The shop PC is not responding. Operator Mode is offline until it is back.'],
-      ['operator_pc_online', 'The shop PC is back online.'],
+      ['operator_result_ready', 'Your task on the business PC has a result. Reply to this message to see it.'],
+      ['operator_pc_offline', 'The business PC is not responding. Operator Mode is offline until it is back.'],
+      ['operator_pc_online', 'The business PC is back online.'],
     ];
     for (const [name, text] of list) {
       try {

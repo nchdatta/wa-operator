@@ -151,7 +151,7 @@ export class Inbound {
       const caption = m.media.caption?.trim() || `I sent a ${m.media.kind === 'image' ? 'photo' : 'file'}.`;
       return `${caption}\n\n[Attached ${m.media.kind} saved at: ${file}]`;
     }
-    await chat.say('I can read text, photos, PDFs and documents. That kind of message is not supported.');
+    await chat.say('I can read text, photos, PDFs and documents and many more.');
     return null;
   }
 
