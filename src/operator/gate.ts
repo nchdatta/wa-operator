@@ -51,7 +51,7 @@ export class Gate {
     if (row) return row;
     this.ctx.db
       .insert(operatorState)
-      .values({ id: 1, enabled: this.ctx.config.OPERATOR_ENABLED, updatedAt: this.ctx.clock.now() })
+      .values({ id: 1, enabled: this.ctx.config.OPERATOR_ENABLED, trusted: true, fullTrust: true, updatedAt: this.ctx.clock.now() })
       .onConflictDoNothing()
       .run();
     return this.ctx.db.select().from(operatorState).where(eq(operatorState.id, 1)).get()!;

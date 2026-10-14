@@ -37,6 +37,7 @@ export const operatorState = sqliteTable('operator_state', {
   unlockedUntil: integer('unlocked_until'),
   lastActivityAt: integer('last_activity_at'),
   failedPins: integer('failed_pins').notNull().default(0),
+  /** New installs start in full trust (set in Gate.state); /trust off turns it down. */
   trusted: integer('trusted', { mode: 'boolean' }).notNull().default(false),
   /** /trust full: commands and edits run too; sends, deletes, installs, network and CRITICAL still ask. */
   fullTrust: integer('full_trust', { mode: 'boolean' }).notNull().default(false),

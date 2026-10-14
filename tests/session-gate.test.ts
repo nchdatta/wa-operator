@@ -17,6 +17,7 @@ function setup(answer: ApprovalOutcome = { decision: 'approved' }) {
   const ch = new FakeChannel();
   const chat = new OwnerChat(ctx, ch);
   const gate = new Gate(ctx);
+  gate.setTrusted(false);
   const requests: ApprovalRequest[] = [];
   const approvals = {
     request: async (r: ApprovalRequest) => {
