@@ -172,7 +172,8 @@ export function plainAction(toolName: string, input: Record<string, unknown>): s
     if (/tab/.test(t)) return 'Switch or open a browser tab';
     return `Use the browser (${human(tool)})`;
   }
-  const to = str(input.to) || str(input.recipient);
+  const list = (v: unknown) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string').join(', ') : str(v));
+  const to = list(input.to) || list(input.recipient) || list(input.recipients);
   const subject = str(input.subject) || str(input.title);
   const lines = [`${server}: ${human(tool)}`];
   if (to) lines.push(`To: ${truncate(to, 120)}`);
@@ -210,9 +211,9 @@ export function plainReason(reason: string): string {
 }
 
 const HEADERS: Record<ApprovalTier, string> = {
-  MEDIUM: '🟦 OK to do this?',
-  HIGH: '🟧 OK to do this?',
-  CRITICAL: "🟥 Important, this can't be undone. OK to do this?",
+  MEDIUM: '🟦 OK?',
+  HIGH: '🟧 OK?',
+  CRITICAL: "🟥 OK? This can't be undone.",
 };
 
 interface Waiter {
@@ -296,21 +297,19 @@ export class ApprovalEngine {
   }
 
   private async sendCard(id: string, req: ApprovalRequest): Promise<void> {
-    const minutes = Math.round(this.ttlMs / 60_000);
-    const task = req.task ? `📌 ${truncate(req.task.replace(/\s+/g, ' '), 60)}\n` : '';
-    const body = `${HEADERS[req.tier]}\n${task}\n${plainAction(req.toolName, req.input)}\n\nAsking because ${plainReason(req.reason)}.`;
-    const footer = `${minutes} min · ${id.slice(-6)}`;
+    // Short on purpose: what it is, yes or no. The reason and ID stay in the audit log.
+    const task = req.task ? `\n(for: ${truncate(req.task.replace(/\s+/g, ' '), 50)})` : '';
+    const body = `${HEADERS[req.tier]}\n${plainAction(req.toolName, req.input)}${task}`;
     let cardId: string | null;
     if (req.tier === 'CRITICAL') {
-      cardId = await this.chat.buttons(body, [{ id: approvalButton('r', id), title: '❌ Cancel' }], { footer });
+      cardId = await this.chat.buttons(body, [{ id: approvalButton('r', id), title: '❌ No' }]);
       const token = this.gate.newPinToken('approval', id);
-      await this.chat.requestPin(token, `🔐 Enter your PIN to approve the critical action above (${id.slice(-6)}).`);
+      await this.chat.requestPin(token, '🔐 Send your PIN to confirm.');
     } else {
-      const buttons = [{ id: approvalButton('a', id), title: '✅ Approve' }];
+      const buttons = [{ id: approvalButton('a', id), title: '✅ Yes' }];
+      buttons.push({ id: approvalButton('r', id), title: '❌ No' });
       if (req.remember) buttons.push({ id: approvalButton('w', id), title: req.remember });
-      else if (req.tier === 'HIGH') buttons.push({ id: approvalButton('e', id), title: '✏️ Edit' });
-      buttons.push({ id: approvalButton('r', id), title: '❌ Cancel' });
-      cardId = await this.chat.buttons(body, buttons, { footer });
+      cardId = await this.chat.buttons(body, buttons);
     }
     if (cardId)
       this.ctx.db.update(proposedActions).set({ cardMessageId: cardId }).where(eq(proposedActions.id, id)).run();
@@ -338,7 +337,7 @@ export class ApprovalEngine {
       audit(this.ctx, { actor: 'system', action: 'approval.expired', target: id, outcome: why });
       if (why === 'timeout')
         void this.chat.notify(
-          `⌛ No answer within ${Math.round(this.ttlMs / 60_000)} min, so I skipped it (${id.slice(-6)}).`,
+          '⌛ No answer, so I skipped that step.',
         );
     }
     return { decision: 'expired' };
@@ -353,20 +352,19 @@ export class ApprovalEngine {
     const b = parseApprovalButton(buttonId);
     if (!b) return false;
     const row = this.ctx.db.select().from(proposedActions).where(eq(proposedActions.id, b.approvalId)).get();
-    const tag = b.approvalId.slice(-6);
     const open = row && row.status === 'pending' && row.expiresAt > this.ctx.clock.now() && this.waiters.has(row.id);
     if (!row || !open) {
-      await this.chat.notify(`⌛ That request (${tag}) is no longer open. Nothing was done.`);
+      await this.chat.notify('⌛ That question has expired. Nothing was done.');
       return true;
     }
     if (b.kind === 'e') {
       if (row.tier !== 'HIGH') return true;
       this.awaitingEdit = row.id;
-      await this.chat.notify(`✏️ What should change? Reply with the correction (${tag}).`);
+      await this.chat.notify('✏️ What should change?');
       return true;
     }
     if (b.kind !== 'r' && row.needsPin) {
-      await this.chat.notify(`🔐 This one needs your PIN (${tag}). Use the PIN form above.`);
+      await this.chat.notify('🔐 This one needs your PIN.');
       return true;
     }
     const status = b.kind === 'r' ? 'rejected' : 'approved';
@@ -379,9 +377,8 @@ export class ApprovalEngine {
         outcome: remember ? 'remember' : 'ok',
       });
       this.resolve(row.id, status === 'approved' && remember ? { decision: status, remember } : { decision: status });
-      if (status === 'rejected') await this.chat.notify(`❌ Cancelled (${tag}).`);
     } else {
-      await this.chat.notify(`⌛ That request (${tag}) is no longer open. Nothing was done.`);
+      await this.chat.notify('⌛ That question has expired. Nothing was done.');
     }
     return true;
   }
@@ -400,7 +397,7 @@ export class ApprovalEngine {
       audit(this.ctx, { actor: 'owner', action: 'approval.approved', target: approvalId, outcome: 'pin' });
       this.resolve(approvalId, { decision: 'approved' });
     } else {
-      await this.chat.notify(`⌛ That request (${approvalId.slice(-6)}) is no longer open. Nothing was done.`);
+      await this.chat.notify('⌛ That question has expired. Nothing was done.');
     }
   }
 

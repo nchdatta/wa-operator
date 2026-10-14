@@ -165,8 +165,11 @@ export class BaileysChannel implements Channel {
     });
 
     sock.ev.on('messages.upsert', ({ messages, type }) => {
-      if (type !== 'notify') return;
+      // 'append' = sent while we were offline (e.g. during a restart): keep the recent ones, so nothing
+      // the owner typed is lost. Re-deliveries are dropped later by the inbound_messages check.
+      const recent = Date.now() / 1000 - 10 * 60;
       for (const m of messages) {
+        if (type !== 'notify' && !(type === 'append' && Number(m.messageTimestamp ?? 0) > recent)) continue;
         const jid = m.key.remoteJid ?? '';
         if (m.key.fromMe || isJidGroup(jid) || isJidBroadcast(jid) || isJidStatusBroadcast(jid)) continue;
         if (m.key.id) this.remember(m);
@@ -213,7 +216,7 @@ export class BaileysChannel implements Channel {
   ) {
     const lines = items.map((b, i) => `*${i + 1}.* ${b.title}${b.description ? ` — ${b.description}` : ''}`);
     const hint = items.some((b) => b.id.startsWith('apv:'))
-      ? '_Reply with a number, or just say ok / no._'
+      ? '_Reply yes or no._'
       : '_Reply with the number._';
     const text = [body, '', ...lines, '', footer ?? '', hint]
       .filter((l, i, a) => l || a[i - 1])

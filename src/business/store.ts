@@ -122,6 +122,13 @@ export function describeSchedule(ctx: AppContext, s: Schedule): string {
   return `[${s.id}] ${s.kind === 'remind' ? '⏰' : '🔁'} ${s.title}: ${describeRule(s)} (next: ${next})`;
 }
 
+/** For the owner's phone: no ids, no raw dates. "⏰ Drink water · Wed 14 Oct, 22:32". */
+export function describeSchedulePlain(ctx: AppContext, s: Schedule): string {
+  const next = s.nextAt ? formatWhen(s.nextAt, ctx.config.BUSINESS_TIMEZONE) : 'done';
+  const when = s.repeat === 'once' ? next : `${describeRule(s).replace(/^every/, 'Every')} (next ${next})`;
+  return `${s.kind === 'remind' ? '⏰' : '🔁'} ${s.title} · ${when}`;
+}
+
 /** Due schedules, each moved on to its next time (or switched off if it was one-time). */
 export function takeDue(ctx: AppContext): Schedule[] {
   const now = ctx.clock.now();

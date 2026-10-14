@@ -183,7 +183,7 @@ describe('inbound', () => {
 
   it('a stale button does nothing', async () => {
     await t.inbound.handle(msg({ button: { id: 'apv:a:01JABCDEFGHJKMNPQRSTVWXYZ0' } }));
-    expect(t.ch.texts().at(-1)).toMatch(/no longer open/);
+    expect(t.ch.texts().at(-1)).toMatch(/expired/);
   });
 });
 

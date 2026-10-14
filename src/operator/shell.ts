@@ -561,6 +561,9 @@ export function analyzeShell(command: string, flavor: ShellFlavor, cwd: string, 
     raise('HIGH', 'encoded command', 'encoded');
   if (/frombase64string|\bdownloadstring\b|\bnet\.webclient\b/i.test(command))
     raise('HIGH', 'decodes or downloads code', 'encoded');
+  // Deleting through .NET or the shell (Recycle Bin moves included) still counts as deleting.
+  if (/DeleteFile|DeleteDirectory|RecycleBin|RecycleOption|InvokeVerb\s*\(\s*['"]?delete|\.Delete\s*\(|\bRemove-Item\b/i.test(command))
+    raise('HIGH', 'deletes inside the work folders', 'deletes');
 
   const { toks, dynamic } = lex(command, flavor);
   for (const d of new Set(dynamic)) raise('HIGH', d);

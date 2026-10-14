@@ -116,7 +116,7 @@ describe('approval engine', () => {
     await expect(p).resolves.toEqual({ decision: 'expired' });
     await engine.onButton(approvalButton('a', id));
     expect(ctx.db.select().from(proposedActions).where(eq(proposedActions.id, id)).get()!.status).toBe('expired');
-    expect(ch.texts().at(-1)).toMatch(/no longer open/);
+    expect(ch.texts().at(-1)).toMatch(/expired/);
   });
 
   it('an approved action is decided once; a second tap is stale', async () => {
@@ -143,7 +143,7 @@ describe('approval engine', () => {
     const p = engine.request(req('CRITICAL'));
     await flush();
     const id = ch.last('buttons')!.buttons[0]!.id.split(':')[2]!;
-    expect(ch.last('buttons')!.buttons.map((b) => b.title)).toEqual(['❌ Cancel']);
+    expect(ch.last('buttons')!.buttons.map((b) => b.title)).toEqual(['❌ No']);
     const pinReq = ch.last('pin')!;
     await engine.onButton(approvalButton('a', id)); // crafted approve tap
     expect(ctx.db.select().from(proposedActions).where(eq(proposedActions.id, id)).get()!.status).toBe('pending');
@@ -157,7 +157,7 @@ describe('approval engine', () => {
     const p = engine.request(req('MEDIUM'));
     await flush();
     const b = ch.last('buttons')!;
-    expect(b.buttons.map((x) => x.title)).toEqual(['✅ Approve', '❌ Cancel']);
+    expect(b.buttons.map((x) => x.title)).toEqual(['✅ Yes', '❌ No']);
     await engine.onButton(b.buttons[1]!.id);
     await expect(p).resolves.toEqual({ decision: 'rejected' });
   });

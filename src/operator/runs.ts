@@ -191,7 +191,7 @@ export class RunQueue {
     if (!rows.length) return '💤 Nothing running or queued.';
     const line = (r: (typeof rows)[number]) =>
       `${r.n}. ${r.running ? '⚙️' : '📥'} ${truncate(r.prompt.replace(/\s+/g, ' '), 60)}`;
-    return `${rows.map(line).join('\n')}\n\n/cancel <number> to stop or drop one.`;
+    return `${rows.map(line).join('\n')}\n\nSay "cancel 2" (any number) to stop or drop one.`;
   }
 
   /** Stop a running task or drop a waiting one by its /queue number. */

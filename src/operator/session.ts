@@ -251,7 +251,7 @@ export function isBrowserTool(name: string): boolean {
 
 type Memo = { kind: 'tool' | 'command' | 'task'; key: string };
 
-const REMEMBER_TITLE: Record<Memo['kind'], string> = { tool: '✅ Always', command: '✅ Today', task: '✅ This task' };
+const REMEMBER_TITLE: Record<Memo['kind'], string> = { tool: '✅ Yes, always', command: '✅ Yes, today', task: '✅ Yes, this job' };
 
 const PARALLEL_RULES = `
 ## Parallel task
@@ -486,7 +486,7 @@ ${memoryBrief(this.ctx)}`,
     let allowed = false;
     let reason = c.reason;
     const g = this.gate.state();
-    const fullTrustAllows = g.fullTrust && c.tier === 'HIGH' && !run.taint.tainted && !stillAsksInFullTrust(c);
+    const fullTrustAllows = g.fullTrust && c.tier === 'HIGH' && !stillAsksInFullTrust(c);
     const memo = this.memoKey(toolName, toolInput, c, run.taint.tainted);
     if (c.tier === 'LOW' || (c.tier === 'MEDIUM' && g.trusted) || fullTrustAllows) {
       allowed = true;
@@ -531,12 +531,12 @@ ${memoryBrief(this.ctx)}`,
         case 'rejected':
           return decide(
             'deny',
-            'They tapped Cancel, so this was not done. Do not try to do it another way. Acknowledge it in a few words, speaking to them as "you" (e.g. "OK, I didn\'t send it.").',
+            'They said no, so this was not done. Do not try to do it another way. Acknowledge it in a few words, speaking to them as "you" (e.g. "OK, I didn\'t send it.").',
           );
         case 'expired':
           return decide(
             'deny',
-            `They didn't tap Approve within ${Math.round(this.ctx.config.OPERATOR_APPROVAL_TTL_SECONDS / 60)} minutes, so this was not done. Tell them briefly, as "you".`,
+            `They didn't answer within ${Math.round(this.ctx.config.OPERATOR_APPROVAL_TTL_SECONDS / 60)} minutes, so this was not done. Tell them briefly, as "you".`,
           );
         case 'failed':
           return decide('deny', `Approval could not be requested (${outcome.error}).`);
@@ -649,8 +649,9 @@ ${memoryBrief(this.ctx)}`,
         const more = msg.queued_turn_count ?? Math.max(run.pendingResults, 0);
         if (more > 0) return;
         const ok = msg.subtype === 'success' && !msg.is_error;
-        const failText =
-          msg.subtype === 'error_max_turns'
+        const failText = run.stopped
+          ? '⏹️ Stopped.'
+          : msg.subtype === 'error_max_turns'
             ? '⚠️ That took too many steps, so I stopped. Try a smaller request.'
             : msg.subtype === 'success'
               ? ''

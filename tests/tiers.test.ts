@@ -219,14 +219,14 @@ describe('full trust', () => {
     expect(asks('mcp__whatsapp-out__send_file', { path: path.join(base, 'x.txt') })).toBe(false);
     expect(asks('mcp__claude_ai_Gmail__get_reply_count', {})).toBe(false);
   });
-  it('still asks for sends, deletes, installs, network and outside edits', () => {
+  it('still asks for sends, deletes, installs and network; not for edits or schedules', () => {
     expect(asks('mcp__claude_ai_Gmail__send_message', {})).toBe(true);
     expect(asks('mcp__claude_ai_Gmail__trash_thread', {})).toBe(true);
     expect(asks('mcp__claude_ai_Gmail__create_draft', {})).toBe(false);
     expect(asks('PowerShell', { command: 'Remove-Item notes.txt' })).toBe(true);
     expect(asks('PowerShell', { command: 'winget install foo' })).toBe(true);
     expect(asks('Bash', { command: 'curl https://x.example' })).toBe(true);
-    expect(asks('Write', { file_path: path.join(base, 'other.txt'), content: 'x' })).toBe(true);
-    expect(asks('CronCreate', {})).toBe(true);
+    expect(asks('Write', { file_path: path.join(base, 'other.txt'), content: 'x' })).toBe(false);
+    expect(asks('CronCreate', {})).toBe(false);
   });
 });

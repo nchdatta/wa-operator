@@ -3,6 +3,7 @@ import { audit } from './audit.js';
 import {
   addSchedule,
   describeSchedule,
+  describeSchedulePlain,
   getRoutine,
   listMemory,
   listRoutines,
@@ -35,37 +36,30 @@ import { errMsg } from './shared/errors.js';
 
 const UNLOCK_PROMPT_COOLDOWN = 60_000;
 
-const HELP = `Just tell me what you need, in your own words (English or Bangla, text or voice). For example:
-• "any new emails today?"
-• "sold 3 bags rice 2400, Rahim took 500 on baki"
-• "make this week's sales report as PDF"
-• "remind me Friday 10am to pay the supplier"
-• "open chatgpt and make a banner"
+const HELP = `Just tell me what you need, like you would tell a person. Text or voice, English or Bangla.
 
-You can send a new job while another is running.
-When I ask before doing something, reply ok or no.
+For example: "any new emails?" · "sold 3 bags rice 2400" · "this week's sales report as PDF" · "remind me 10am to pay the supplier"
 
-Handy phrases:
-"stop" · "show tasks" · "cancel 2" · "start over" · "what's going on" · "full trust" / "ask me first" · "lock"
+I only ask before sending, deleting or paying. Reply yes or no.
 
-(Shortcuts like /stop and /status also work.)`;
+Quick words: stop · tasks · status · lock`;
 
 /** Everyday phrases for the shortcuts, so nobody has to learn commands. Whole message only. */
 const NATURAL: [RegExp, string][] = [
-  [/^(stop|stop it|stop now|stop that|stop everything|stop all|cancel it|cancel all|cancel that|থামো|বন্ধ করো|থামাও)$/, '/stop'],
-  [/^(?:stop|cancel|drop|remove)(?: task| job)? (?:#|no\.? ?)?(\d{1,3})$/, '/cancel $1'],
-  [/^(help|what can you do|how do i use (?:this|you)|how does this work|commands|কি কি পারো|সাহায্য)$/, '/help'],
-  [/^(menu|show menu|quick jobs)$/, '/menu'],
-  [/^(status|what'?s going on|what are you doing|are you busy|are you working|what'?s happening|কি করছ|কী করছ)$/, '/status'],
-  [/^(queue|show queue|show (?:my )?tasks|my tasks|what'?s queued|what'?s waiting|what'?s running|tasks|jobs)$/, '/queue'],
-  [/^(lock|lock it|lock now|lock up|লক করো)$/, '/lock'],
-  [/^(emergency stop|kill|kill everything|stop everything and lock)$/, '/kill'],
-  [/^(start over|start again|start fresh|fresh start|new chat|new conversation|reset|নতুন করে শুরু)$/, '/new'],
-  [/^(full trust|trust full|trust me fully|don'?t ask(?: me)?(?: anymore)?|stop asking(?: me)?|no need to ask)$/, '/trust full'],
-  [/^(trust on|trust me)$/, '/trust on'],
-  [/^(trust off|ask me first|always ask(?: me)?|be careful)$/, '/trust off'],
-  [/^(reminders|show reminders|my reminders|list reminders)$/, '/reminders'],
-  [/^(memory|what do you remember|show memory|what do you know about (?:me|the business))$/, '/memory'],
+  [/^(stop|stop it|stop all|cancel it|cancel all|থামো|বন্ধ করো)$/, '/stop'],
+  [/^(?:stop|cancel)(?: task| job)? (?:#|no\.? ?)?(\d{1,3})$/, '/cancel $1'],
+  [/^(help|সাহায্য)$/, '/help'],
+  [/^(menu)$/, '/menu'],
+  [/^(status)$/, '/status'],
+  [/^(tasks|jobs|show tasks|show jobs|queue)$/, '/queue'],
+  [/^(lock|লক করো)$/, '/lock'],
+  [/^(emergency stop)$/, '/kill'],
+  [/^(start over|new chat|reset)$/, '/new'],
+  [/^(full trust|trust full)$/, '/trust full'],
+  [/^(trust on)$/, '/trust on'],
+  [/^(trust off|ask me first)$/, '/trust off'],
+  [/^(reminders|show reminders)$/, '/reminders'],
+  [/^(memory|show memory)$/, '/memory'],
 ];
 
 /** "stop", "start over", "show tasks"… → the matching shortcut, or null for an ordinary instruction. */
@@ -434,24 +428,24 @@ export class Inbound {
         const mins = (ms: number) => `${Math.max(0, Math.round(ms / 60_000))} min`;
         const idleLeft =
           gate.isUnlocked() && s.lastActivityAt !== null
-            ? ` (locks after ${mins(s.lastActivityAt + this.d.ctx.config.OPERATOR_IDLE_MIN * 60_000 - now)} idle)`
+            ? ` · locks in ${mins(s.lastActivityAt + this.d.ctx.config.OPERATOR_IDLE_MIN * 60_000 - now)} if quiet`
             : '';
+        // Plain words only; model, usage details and offline connectors stay in the logs.
+        const usage = governor.describe();
+        const running = session.runningCount();
+        const queued = runs.queuedCount();
         const lines = [
-          s.enabled
-            ? gate.isUnlocked()
-              ? `🔓 Unlocked${idleLeft}`
-              : '🔒 Locked'
-            : `⏸️ Off (${s.disabledReason ?? 'disabled'})`,
-          session.busy ? `⚙️ Running: ${session.runningCount()} of ${session.size}` : '💤 Idle',
-          `📥 Queued: ${runs.queuedCount()}`,
-          `🤝 Trusted mode: ${s.fullTrust ? 'full' : s.trusted ? 'on' : 'off'}`,
-          `🧠 Model: ${info.model ?? this.d.ctx.config.OPERATOR_MODEL}${info.startedAt ? ` · conversation ${mins(now - info.startedAt)} old` : ''}`,
-          `📊 Claude usage: ${governor.describe()}`,
+          s.enabled ? (gate.isUnlocked() ? `🔓 Ready${idleLeft}` : '🔒 Locked') : '⏸️ Turned off at the PC',
+          session.busy ? `⚙️ Working on ${running} job${running > 1 ? 's' : ''}` : '💤 Free',
+          ...(queued ? [`📥 ${queued} waiting`] : []),
+          s.fullTrust
+            ? '🤝 I only ask before sending, deleting or paying'
+            : s.trusted
+              ? '🤝 I ask before most changes'
+              : '🤝 I ask before every change',
+          ...(/^allowed/.test(usage) ? [] : [`📊 ${usage}`]),
         ];
-        if (info.failedServers.length) {
-          const names = info.failedServers.map((s) => s.replace(/\s*\(.*\)$/, '').replace(/^(plugin:[^:]+:|claude\.ai )/, ''));
-          lines.push(`⚠️ Offline (${names.length}): ${names.slice(0, 4).join(', ')}${names.length > 4 ? '…' : ''}`);
-        }
+        if (info.failedServers.length) this.d.ctx.logger.info({ offline: info.failedServers }, 'status: offline servers');
         await chat.say(lines.join('\n'), { format: false });
         return;
       }
@@ -467,7 +461,7 @@ export class Inbound {
         const rows = listSchedules(this.d.ctx);
         await chat.say(
           rows.length
-            ? `${rows.map((s) => describeSchedule(this.d.ctx, s)).join('\n')}\n\nTo cancel one, say "cancel reminder" and its id.`
+            ? `${rows.map((s) => describeSchedulePlain(this.d.ctx, s)).join('\n')}\n\nTo remove one, just say which, e.g. "cancel the water reminder".`
             : 'No reminders or scheduled tasks. Try: "remind me Friday 6pm to call the supplier".',
           { format: false },
         );
