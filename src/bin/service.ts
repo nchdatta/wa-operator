@@ -44,7 +44,8 @@ async function main(): Promise<void> {
   }
   // Voice notes: run the local whisper server alongside, so start/stop covers it too.
   const whisper = WhisperManager.wanted(config) ? new WhisperManager(config, logger) : undefined;
-  if (whisper) config.WHISPER_URL = whisper.url;
+  // The config is frozen: hand everything a copy that points at the local whisper server.
+  if (whisper) config = Object.freeze({ ...config, WHISPER_URL: whisper.url });
   const db = openDb(config.databasePath, ensureDataKey(config.OPERATOR_DATA_KEY));
   const secrets = SECRET_NAMES.map((n) => config[n]).filter((v): v is string => !!v);
   const ctx: AppContext = { config, db, logger, clock: systemClock, secrets };
