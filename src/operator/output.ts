@@ -125,61 +125,76 @@ export function captureScreen(file: string): Promise<Shot> {
   });
 }
 
-/** Questions Claude asked the owner with ask_owner, answered by a button tap or the next text. */
+interface PendingQuestion {
+  id: string;
+  /** Session slot that asked, so ending one task never drops another task's question. */
+  owner: string;
+  options: string[];
+  resolve: (answer: string | null) => void;
+}
+
+/**
+ * Questions Claude asked the owner with ask_owner, answered by a button tap or the next text. Parallel
+ * tasks can each have one open question; a plain text answers the newest.
+ */
 export class OwnerQuestions {
-  private pending: { id: string; options: string[]; resolve: (answer: string | null) => void } | null = null;
+  private readonly pending: PendingQuestion[] = [];
 
   constructor(private readonly ttlMs: number) {}
 
   get open(): boolean {
-    return this.pending !== null;
+    return this.pending.length > 0;
   }
 
-  ask(options: string[], send: (id: string) => Promise<void>): Promise<string | null> {
-    this.pending?.resolve(null);
+  ask(options: string[], send: (id: string) => Promise<void>, owner = '0'): Promise<string | null> {
+    this.cancel(owner);
     const id = newId();
     return new Promise((resolve) => {
       const timer = setTimeout(() => this.settle(id, null), this.ttlMs);
-      this.pending = {
+      this.pending.push({
         id,
+        owner,
         options,
         resolve: (a) => {
           clearTimeout(timer);
           resolve(a);
         },
-      };
+      });
       send(id).catch(() => this.settle(id, null));
     });
   }
 
   private settle(id: string, answer: string | null): boolean {
-    if (!this.pending || this.pending.id !== id) return false;
-    const p = this.pending;
-    this.pending = null;
-    p.resolve(answer);
+    const i = this.pending.findIndex((p) => p.id === id);
+    if (i < 0) return false;
+    const [p] = this.pending.splice(i, 1);
+    p!.resolve(answer);
     return true;
   }
 
   /** Button id "ask:<id>:<n>". */
   onButton(buttonId: string): boolean {
     const m = /^ask:([0-9A-HJKMNP-TV-Z]{26}):(\d)$/.exec(buttonId);
-    if (!m || !this.pending || this.pending.id !== m[1]) return false;
-    return this.settle(m[1]!, this.pending.options[Number(m[2])] ?? null);
+    const p = m && this.pending.find((q) => q.id === m[1]);
+    if (!m || !p) return false;
+    return this.settle(p.id, p.options[Number(m[2])] ?? null);
   }
 
   onText(text: string): boolean {
-    return this.pending ? this.settle(this.pending.id, text) : false;
+    const p = this.pending.at(-1);
+    return p ? this.settle(p.id, text) : false;
   }
 
-  cancel(): void {
-    if (this.pending) this.settle(this.pending.id, null);
+  /** Drop the open question of one session slot, or every question when no slot is given. */
+  cancel(owner?: string): void {
+    for (const p of [...this.pending]) if (owner === undefined || p.owner === owner) this.settle(p.id, null);
   }
 }
 
 const ok = (text: string) => ({ content: [{ type: 'text' as const, text }] });
 const fail = (text: string) => ({ content: [{ type: 'text' as const, text }], isError: true });
 
-export function createWhatsAppOutServer(ctx: AppContext, chat: OwnerChat, questions: OwnerQuestions) {
+export function createWhatsAppOutServer(ctx: AppContext, chat: OwnerChat, questions: OwnerQuestions, slot = '0') {
   const sendFile = (kind: 'document' | 'image') => async (args: { path: string; caption?: string | undefined }) => {
     try {
       const stat = await fs.promises.stat(args.path);
@@ -256,7 +271,7 @@ export function createWhatsAppOutServer(ctx: AppContext, chat: OwnerChat, questi
                 options.map((title, i) => ({ id: `ask:${id}:${i}`, title })),
               );
             } else await chat.say(`❓ ${args.question}`);
-          });
+          }, slot);
           return answer === null
             ? fail('No answer in time. Choose a safe default or stop.')
             : ok(`They answered: ${answer}`);

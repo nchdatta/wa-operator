@@ -30,6 +30,11 @@ export class TaintTracker {
     if (call.taints && !this.tainted) this.taintedBy = call.toolName;
   }
 
+  /** The owner approved a visit after taint: that site is known for the rest of the task. */
+  allowDomain(domain: string): void {
+    this.domains.add(domain);
+  }
+
   /** The owner added to the task: domains they name are trusted too. */
   addOwnerText(text: string): void {
     for (const d of domainsIn(text)) this.domains.add(d);

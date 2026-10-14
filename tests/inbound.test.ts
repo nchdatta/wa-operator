@@ -9,7 +9,8 @@ import { WebhookPayload } from '../src/meta/webhook-schema.js';
 import { Gate } from '../src/operator/gate.js';
 import { OwnerQuestions } from '../src/operator/output.js';
 import { RunQueue } from '../src/operator/runs.js';
-import type { OperatorSession, RunHandle, RunResult } from '../src/operator/session.js';
+import type { RunHandle, RunResult } from '../src/operator/session.js';
+import { SessionPool, type Slot } from '../src/operator/pool.js';
 import { auditEvents, jobs, operatorRuns } from '../src/persistence/schema.js';
 import { Governor } from '../src/runtime/governor.js';
 import { createWebhookApp } from '../src/webhook/app.js';
@@ -27,6 +28,11 @@ class StubSession {
   }
   get currentRunId() {
     return null;
+  }
+  currentSource = null;
+  currentPrompt = null;
+  info() {
+    return { model: null, startedAt: null, failedServers: [] };
   }
   ensure() {}
   runTask(h: RunHandle): Promise<RunResult> {
@@ -64,14 +70,15 @@ function setup() {
   const governor = new Governor(ctx, async () => {});
   const questions = new OwnerQuestions(300_000);
   const session = new StubSession();
-  const runs = new RunQueue(ctx, chat, gate, session as unknown as OperatorSession, governor);
+  const pool = new SessionPool([session as unknown as Slot]);
+  const runs = new RunQueue(ctx, chat, gate, pool, governor);
   const inbound = new Inbound({
     ctx,
     chat,
     gate,
     approvals,
     questions,
-    session: session as unknown as OperatorSession,
+    session: pool,
     runs,
     governor,
     operatorId: OWNER,

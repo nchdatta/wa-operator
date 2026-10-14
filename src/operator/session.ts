@@ -63,6 +63,8 @@ export interface RunHandle {
   id: string;
   prompt: string;
   sourceMessageId: string | null;
+  /** The owner's request as shown in /queue and on approval cards (prompt may carry added context). */
+  title?: string;
   /** schedule: started by a saved schedule. While locked it may only use LOW-tier tools. */
   origin?: 'owner' | 'schedule';
 }
@@ -230,6 +232,11 @@ function describeTool(name: string, input: Record<string, unknown>): string {
   return 'Working';
 }
 
+const PARALLEL_RULES = `
+## Parallel task
+You run beside the main conversation, which may be busy with another task. You do not see its history: if a request depends on earlier context you lack, ask in one line. Another task may be using the browser, so open your own tab and leave other tabs alone.
+`;
+
 /** Rough effort pick: multi-step requests get more thinking. */
 export function pickEffort(prompt: string): 'medium' | 'high' {
   return prompt.length > 280 ||
@@ -271,6 +278,10 @@ export class OperatorSession {
     private readonly approvals: ApprovalEngine,
     private readonly governor: Governor,
     private readonly questions: OwnerQuestions,
+    /** Parallel slot: 0 is the main conversation, higher slots take tasks while it is busy. */
+    readonly slot = 0,
+    /** Another slot is running a task too (approval cards then name the task). */
+    private readonly othersRunning: () => boolean = () => false,
   ) {
     this.policy = buildPathPolicy(ctx);
   }
@@ -283,6 +294,20 @@ export class OperatorSession {
     return this.run?.id ?? null;
   }
 
+  /** The owner message that started the running task. */
+  get currentSource(): string | null {
+    return this.run?.sourceMessageId ?? null;
+  }
+
+  get currentPrompt(): string | null {
+    return this.run ? (this.run.title ?? this.run.prompt) : null;
+  }
+
+  /** operator_sessions key: one resumable conversation per day and slot. */
+  private key(day: string): string {
+    return this.slot ? `${day}#${this.slot}` : day;
+  }
+
   info(): SessionInfo {
     return { model: this.model, startedAt: this.startedAt, failedServers: this.failedServers };
   }
@@ -293,7 +318,11 @@ export class OperatorSession {
     if (this.q && this.day === today) return;
     if (this.q && this.run) return; // never cut a running task at midnight
     this.close();
-    const saved = this.ctx.db.select().from(operatorSessions).where(eq(operatorSessions.day, today)).get();
+    const saved = this.ctx.db
+      .select()
+      .from(operatorSessions)
+      .where(eq(operatorSessions.day, this.key(today)))
+      .get();
     const resume = saved && !saved.closedAt ? saved.sessionId : undefined;
     this.day = today;
     this.startedAt = this.ctx.clock.now();
@@ -307,7 +336,7 @@ export class OperatorSession {
         this.inbox = null;
       }
     });
-    this.ctx.logger.info({ day: today, resume: !!resume }, 'operator session started');
+    this.ctx.logger.info({ day: today, slot: this.slot, resume: !!resume }, 'operator session started');
   }
 
   private options(resume: string | undefined): Options {
@@ -330,14 +359,14 @@ export class OperatorSession {
       settingSources: ['user'],
       mcpServers: {
         ...imported.servers,
-        'whatsapp-out': createWhatsAppOutServer(this.ctx, this.chat, this.questions),
+        'whatsapp-out': createWhatsAppOutServer(this.ctx, this.chat, this.questions, String(this.slot)),
         business: createBusinessServer(this.ctx),
       },
       systemPrompt: {
         type: 'preset',
         preset: 'claude_code',
         append: `${operatorRules(c)}
-
+${this.slot ? PARALLEL_RULES : ''}
 ${memoryBrief(this.ctx)}`,
       },
       disallowedTools: HARD_DENY,
@@ -441,6 +470,7 @@ ${memoryBrief(this.ctx)}`,
           input: toolInput,
           tier: c.tier,
           reason: c.reason,
+          ...(this.othersRunning() ? { task: run.title ?? run.prompt } : {}),
           ...(memo ? { remember: memo.kind === 'tool' ? '✅ Always' : '✅ Today' } : {}),
         },
         signal,
@@ -451,6 +481,7 @@ ${memoryBrief(this.ctx)}`,
         case 'approved':
           allowed = true;
           reason = 'They approved it.';
+          if (c.domain && run.taint.tainted) run.taint.allowDomain(c.domain);
           if (outcome.remember && memo) this.remember(memo, toolName, run);
           break;
         case 'edit':
@@ -592,7 +623,7 @@ ${memoryBrief(this.ctx)}`,
     const now = this.ctx.clock.now();
     this.ctx.db
       .insert(operatorSessions)
-      .values({ day: this.day, sessionId, createdAt: now })
+      .values({ day: this.key(this.day), sessionId, createdAt: now })
       .onConflictDoUpdate({ target: operatorSessions.day, set: { sessionId, closedAt: null } })
       .run();
   }
@@ -603,7 +634,7 @@ ${memoryBrief(this.ctx)}`,
     this.run = null;
     this.lastRunEndedAt = this.ctx.clock.now();
     this.allowedToolUses.clear();
-    this.questions.cancel();
+    this.questions.cancel(String(this.slot));
     run.done({ ...r, stopped: run.stopped, toolCalls: run.toolCalls, tainted: run.taint.tainted });
   }
 
@@ -663,7 +694,7 @@ ${memoryBrief(this.ctx)}`,
 
   async interrupt(): Promise<void> {
     if (this.run) this.run.stopped = true;
-    this.questions.cancel();
+    this.questions.cancel(String(this.slot));
     try {
       await this.q?.interrupt();
     } catch (e) {
@@ -684,7 +715,7 @@ ${memoryBrief(this.ctx)}`,
       this.ctx.db
         .update(operatorSessions)
         .set({ closedAt: this.ctx.clock.now() })
-        .where(eq(operatorSessions.day, this.day))
+        .where(eq(operatorSessions.day, this.key(this.day)))
         .run();
     this.close();
   }

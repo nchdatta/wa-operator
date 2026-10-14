@@ -18,7 +18,8 @@ import { Inbound } from '../src/inbound.js';
 import { Gate } from '../src/operator/gate.js';
 import { OwnerQuestions } from '../src/operator/output.js';
 import { RunQueue } from '../src/operator/runs.js';
-import type { OperatorSession, RunHandle, RunResult } from '../src/operator/session.js';
+import type { RunHandle, RunResult } from '../src/operator/session.js';
+import { SessionPool, type Slot } from '../src/operator/pool.js';
 import { classify } from '../src/operator/tiers.js';
 import { buildPathPolicy } from '../src/operator/session.js';
 import { Governor } from '../src/runtime/governor.js';
@@ -131,6 +132,11 @@ class StubSession {
   handles: RunHandle[] = [];
   busy = false;
   currentRunId = null;
+  currentSource = null;
+  currentPrompt = null;
+  info() {
+    return { model: null, startedAt: null, failedServers: [] };
+  }
   ensure() {}
   async runTask(h: RunHandle): Promise<RunResult> {
     this.handles.push(h);
@@ -152,14 +158,15 @@ function setup() {
   const gate = new Gate(ctx);
   const governor = new Governor(ctx, async () => {});
   const session = new StubSession();
-  const runs = new RunQueue(ctx, chat, gate, session as unknown as OperatorSession, governor);
+  const pool = new SessionPool([session as unknown as Slot]);
+  const runs = new RunQueue(ctx, chat, gate, pool, governor);
   const inbound = new Inbound({
     ctx,
     chat,
     gate,
     approvals: new ApprovalEngine(ctx, chat, gate),
     questions: new OwnerQuestions(300_000),
-    session: session as unknown as OperatorSession,
+    session: pool,
     runs,
     governor,
     operatorId: OWNER,

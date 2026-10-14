@@ -8,31 +8,37 @@ import { truncate } from '../security/redact.js';
 import { errMsg } from '../shared/errors.js';
 import { newId } from '../shared/ids.js';
 import type { Gate } from './gate.js';
-import type { OperatorSession, RunResult } from './session.js';
+import type { SessionPool } from './pool.js';
+import type { RunResult } from './session.js';
 
 /**
- * Owner instructions as durable runs. One runs at a time; others wait as `queued` with a notice.
+ * Owner instructions as durable runs. Up to one per session slot run at once; the rest wait as `queued`.
  * After a restart, a run that was in progress is reported back instead of silently lost.
  */
 export class RunQueue {
   private draining = false;
-  private runningSourceId: string | null = null;
+  /** Runs claimed and handed to the pool (counted before the slot reports busy). */
+  private active = 0;
 
   constructor(
     private readonly ctx: AppContext,
     private readonly chat: OwnerChat,
     private readonly gate: Gate,
-    private readonly session: OperatorSession,
+    private readonly pool: SessionPool,
     private readonly governor: Governor,
   ) {}
 
-  /** Message ID of the owner message that started the running task (replies to it add to the task). */
-  get runningSource(): string | null {
-    return this.runningSourceId;
-  }
-
   queuedCount(): number {
     return this.ctx.db.select({ n: count() }).from(operatorRuns).where(eq(operatorRuns.status, 'queued')).get()?.n ?? 0;
+  }
+
+  private queued() {
+    return this.ctx.db
+      .select()
+      .from(operatorRuns)
+      .where(eq(operatorRuns.status, 'queued'))
+      .orderBy(asc(operatorRuns.createdAt))
+      .all();
   }
 
   async enqueue(
@@ -41,14 +47,18 @@ export class RunQueue {
     origin: 'owner' | 'schedule' = 'owner',
   ): Promise<string> {
     const id = newId();
-    const busy = this.session.busy || this.queuedCount() > 0;
+    const waiting = this.active >= this.pool.size || this.queuedCount() > 0;
     this.ctx.db
       .insert(operatorRuns)
       .values({ id, status: 'queued', origin, prompt, sourceMessageId, createdAt: this.ctx.clock.now() })
       .run();
-    if (busy && origin === 'owner') {
+    if (waiting && origin === 'owner' && this.gate.isUnlocked()) {
+      const n = this.queuedCount();
       if (sourceMessageId) await this.chat.react(sourceMessageId, '📥');
-      await this.chat.notify('📥 Queued, after the current task.', sourceMessageId ? { replyTo: sourceMessageId } : {});
+      await this.chat.notify(
+        `📥 Queued #${n}. /queue to see, /cancel ${this.pool.runningCount() + n} to drop.`,
+        sourceMessageId ? { replyTo: sourceMessageId } : {},
+      );
     }
     void this.drain();
     return id;
@@ -58,7 +68,7 @@ export class RunQueue {
     if (this.draining) return;
     this.draining = true;
     try {
-      for (;;) {
+      while (this.active < this.pool.size) {
         // While locked only scheduled runs go ahead (read-only, see the session gate); the owner's wait.
         const unlocked = this.gate.isUnlocked();
         if (!unlocked && !this.gate.state().enabled) break;
@@ -74,36 +84,45 @@ export class RunQueue {
           .limit(1)
           .get();
         if (!next) break;
-        await this.execute(next);
+        if (!this.claim(next.id)) continue;
+        this.active++;
+        void this.execute(next).finally(() => {
+          this.active--;
+          void this.drain();
+        });
       }
     } finally {
       this.draining = false;
     }
   }
 
+  private claim(id: string): boolean {
+    return (
+      this.ctx.db
+        .update(operatorRuns)
+        .set({ status: 'running', startedAt: this.ctx.clock.now() })
+        .where(and(eq(operatorRuns.id, id), eq(operatorRuns.status, 'queued')))
+        .run().changes === 1
+    );
+  }
+
   private async execute(run: typeof operatorRuns.$inferSelect): Promise<void> {
-    const now = this.ctx.clock.now();
-    const claimed = this.ctx.db
-      .update(operatorRuns)
-      .set({ status: 'running', startedAt: now })
-      .where(and(eq(operatorRuns.id, run.id), eq(operatorRuns.status, 'queued')))
-      .run();
-    if (claimed.changes !== 1) return;
     if (!this.governor.canRunOwnerTask()) {
       this.finish(run.id, 'failed', { error: 'usage limit' });
       await this.chat.notify(`⛔ Claude usage limit reached (${this.governor.describe()}). Try again later.`);
       return;
     }
-    this.runningSourceId = run.sourceMessageId;
-    if (run.sourceMessageId) await this.chat.react(run.sourceMessageId, '⏳');
     let result: RunResult;
     try {
-      result = await this.session.runTask({
+      // Start the task before any await, so the slot is taken in this tick.
+      const pending = this.pool.runTask({
         id: run.id,
         prompt: run.prompt,
         sourceMessageId: run.sourceMessageId,
         origin: run.origin,
       });
+      if (run.sourceMessageId) await this.chat.react(run.sourceMessageId, '⏳');
+      result = await pending;
     } catch (e) {
       result = {
         ok: false,
@@ -112,8 +131,6 @@ export class RunQueue {
         toolCalls: 0,
         tainted: false,
       };
-    } finally {
-      this.runningSourceId = null;
     }
     const status = result.stopped ? 'stopped' : result.ok ? 'done' : 'failed';
     this.finish(run.id, status, { result: result.text, toolCalls: result.toolCalls, tainted: result.tainted });
@@ -149,6 +166,38 @@ export class RunQueue {
       .run();
   }
 
+  /** Running tasks first, then waiting ones; /cancel takes the number shown here. */
+  list(): { n: number; runId: string; prompt: string; running: boolean }[] {
+    const rows = [
+      ...this.pool.running().map((r) => ({ runId: r.runId, prompt: r.prompt, running: true })),
+      ...this.queued().map((r) => ({ runId: r.id, prompt: r.prompt, running: false })),
+    ];
+    return rows.map((r, i) => ({ n: i + 1, ...r }));
+  }
+
+  describe(): string {
+    const rows = this.list();
+    if (!rows.length) return '💤 Nothing running or queued.';
+    const line = (r: (typeof rows)[number]) =>
+      `${r.n}. ${r.running ? '⚙️' : '📥'} ${truncate(r.prompt.replace(/\s+/g, ' '), 60)}`;
+    return `${rows.map(line).join('\n')}\n\n/cancel <number> to stop or drop one.`;
+  }
+
+  /** Stop a running task or drop a waiting one by its /queue number. */
+  async cancel(n: number): Promise<string | null> {
+    const row = this.list().find((r) => r.n === n);
+    if (!row) return null;
+    if (row.running) await this.pool.interrupt(row.runId);
+    else
+      this.ctx.db
+        .update(operatorRuns)
+        .set({ status: 'stopped', finishedAt: this.ctx.clock.now() })
+        .where(and(eq(operatorRuns.id, row.runId), eq(operatorRuns.status, 'queued')))
+        .run();
+    audit(this.ctx, { actor: 'owner', action: 'run.cancelled', target: row.runId, outcome: row.running ? 'stop' : 'drop' });
+    return row.prompt;
+  }
+
   /** Drop everything waiting (used by /kill). */
   clearQueued(): number {
     return this.ctx.db
@@ -168,9 +217,7 @@ export class RunQueue {
     for (const r of open) {
       this.finish(r.id, 'interrupted', {});
       audit(this.ctx, { actor: 'system', action: 'run.interrupted', target: r.id, outcome: 'restart' });
-      await this.chat.notify(
-        `⚠️ The PC restarted while I was working on: "${truncate(r.prompt, 120)}". Nothing after the restart was done. Send it again if you still need it.`,
-      );
+      await this.chat.notify(`⚠️ PC restarted during: "${truncate(r.prompt, 120)}". Send it again if still needed.`);
     }
   }
 }

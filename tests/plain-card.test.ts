@@ -14,7 +14,7 @@ describe('approval card text', () => {
       plainReason(
         'new tool mcp__browser__browser_evaluate (suggested HIGH; confirm on the PC with "wa-operator tiers")',
       ),
-    ).toBe('Claude has not used this before');
+    ).toBe('first time using this tool');
   });
 
   it('describes commands by their purpose, not their text', () => {

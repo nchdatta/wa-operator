@@ -14,8 +14,8 @@ Meta webhook (signed) ─► store job (SQLite) ─► 200 OK
    job processor ─► sender == operator?  no ─► drop, no reply, audit
                                  │ yes
    1. approval button / PIN Flow / answer ─► approval engine · gate · ask_owner
-   2. /stop /status /new /trust /lock /kill /help
-   3. instruction ─► (PIN unlock if locked) ─► run queue (one at a time) ─► warm Agent SDK session
+   2. /stop /status /queue /cancel /new /trust /lock /kill /help
+   3. instruction ─► (PIN unlock if locked) ─► run queue (OPERATOR_PARALLEL slots, default 2) ─► warm Agent SDK session per slot
                                                        │
             PreToolUse hook on EVERY tool call ─► tiers ─► allow · card · card+PIN · deny
 ```
@@ -39,7 +39,7 @@ How the tiers are applied:
 
 ## Commands from the phone
 
-`/stop` · `/status` · `/new` · `/trust on|off` · `/lock` · `/kill` · `/help`. Anything else is an instruction.
+`/stop` · `/status` · `/queue` · `/cancel N` · `/new` · `/trust full|on|off` · `/lock` · `/kill` · `/help`. Anything else is an instruction; a new one starts beside a running task, and a short "continue" (or a reply to the task) joins it. New installs start in full trust.
 
 ## Commands at the PC
 

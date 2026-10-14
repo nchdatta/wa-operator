@@ -11,7 +11,7 @@ import { WebhookPayload } from './meta/webhook-schema.js';
 import { Gate } from './operator/gate.js';
 import { OwnerQuestions } from './operator/output.js';
 import { RunQueue } from './operator/runs.js';
-import { OperatorSession } from './operator/session.js';
+import { SessionPool } from './operator/pool.js';
 import { Governor } from './runtime/governor.js';
 import { JobProcessor } from './runtime/jobs.js';
 import { Scheduler } from './runtime/scheduler.js';
@@ -22,7 +22,7 @@ export interface OperatorApp {
   approvals: ApprovalEngine;
   governor: Governor;
   questions: OwnerQuestions;
-  session: OperatorSession;
+  session: SessionPool;
   runs: RunQueue;
   inbound: Inbound;
   processor: JobProcessor;
@@ -43,7 +43,7 @@ export function createOperatorApp(
   const approvals = new ApprovalEngine(ctx, chat, gate);
   const governor = new Governor(ctx, (t) => chat.notify(t));
   const questions = new OwnerQuestions(ctx.config.OPERATOR_APPROVAL_TTL_SECONDS * 1000);
-  const session = new OperatorSession(ctx, chat, gate, approvals, governor, questions);
+  const session = SessionPool.create(ctx, chat, gate, approvals, governor, questions);
   const runs = new RunQueue(ctx, chat, gate, session, governor);
   const scheduler = new Scheduler(ctx, chat, gate, runs);
   const operatorId = channel.name === 'telegram' ? ctx.config.TELEGRAM_OPERATOR_USER_ID! : ctx.config.OPERATOR_WA_ID!;

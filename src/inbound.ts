@@ -18,7 +18,7 @@ import type { Gate } from './operator/gate.js';
 import { saveToInbox, transcribe } from './operator/media.js';
 import type { OwnerQuestions } from './operator/output.js';
 import type { RunQueue } from './operator/runs.js';
-import type { OperatorSession } from './operator/session.js';
+import type { SessionPool } from './operator/pool.js';
 import { inboundMessages } from './persistence/schema.js';
 import type { Governor } from './runtime/governor.js';
 import { maskWaId, truncate } from './security/redact.js';
@@ -29,25 +29,33 @@ import { errMsg } from './shared/errors.js';
  * up as a Claude prompt:
  *   0. sender is not the operator      → dropped, no reply, logged
  *   1. approval button / PIN / answer  → approval engine, gate, or the waiting question
- *   2. slash command                   → /stop /status /new /trust /kill /lock /help
+ *   2. slash command                   → /stop /status /queue /cancel /new /trust /kill /lock /help
  *   3. everything else                 → (unlock if needed) → run queue → Claude
  */
 
 const UNLOCK_PROMPT_COOLDOWN = 60_000;
 
-const HELP = `Operator Mode commands:
-/menu – quick jobs and your saved routines
-/reminders – reminders and scheduled tasks
-/memory – what I remember about the business
-/briefing 08:00 – morning briefing every day (/briefing off to stop)
-/summary 21:00 – end-of-day summary every day (/summary off to stop)
-/stop – stop the current task
+const HELP = `Just type what you need. You can send a new task while another runs.
+
+/queue – running and waiting tasks
+/cancel 2 – stop or drop task 2
+/stop – stop all running tasks
 /status – what's going on
-/new – start a fresh conversation
-/trust on|full|off – on: edits run without asking; full: commands too (sends/deletes still ask)
-/lock – lock until the next PIN
-/kill – stop everything and lock
-Anything else is an instruction for the PC. Examples: "remind me Thursday 10am to pay the supplier", "sold 3 bags of rice 2400", "save this as month close".`;
+/menu – quick jobs and routines
+/reminders · /memory
+/briefing 08:00 · /summary 21:00 (off to stop)
+/trust full|on|off – how much runs without asking
+/new – fresh conversation
+/lock · /kill – lock, or stop all and lock`;
+
+/** Short nudges that continue the running task instead of starting a new one. */
+const FOLLOW_UP =
+  /^(continue|go on|go ahead|carry on|proceed|keep going|resume|yes|yep|yeah|ok|okay|sure|do it|try again|retry|হ্যাঁ|ঠিক আছে|চালিয়ে যাও)(?![a-z])/i;
+
+export function isFollowUp(text: string): boolean {
+  const t = text.trim();
+  return t.split(/\s+/).length <= 8 && FOLLOW_UP.test(t);
+}
 
 const BRIEFING = `Morning briefing. Keep it short, phone-sized:
 1. Today's calendar and anything due today (open tasks, reminders).
@@ -90,7 +98,7 @@ export interface InboundDeps {
   gate: Gate;
   approvals: ApprovalEngine;
   questions: OwnerQuestions;
-  session: OperatorSession;
+  session: SessionPool;
   runs: RunQueue;
   governor: Governor;
   /** Provider ID of the one allowed sender. */
@@ -158,9 +166,10 @@ export class Inbound {
       const prompt = await this.toPrompt(m);
       if (!prompt) return;
 
-      // A reply to the running task's message adds to that task.
-      if (this.d.session.busy && m.replyToId && m.replyToId === this.d.runs.runningSource && gate.isUnlocked()) {
-        if (this.d.session.addToRun(prompt)) {
+      // A reply to a running task's message, or a short "continue" while one task runs, adds to that task.
+      if (this.d.session.busy && gate.isUnlocked()) {
+        const source = m.replyToId && this.d.session.hasSource(m.replyToId) ? m.replyToId : null;
+        if ((source || isFollowUp(prompt)) && this.d.session.addToRun(prompt, source)) {
           await chat.react(m.id, '👍');
           return;
         }
@@ -202,7 +211,6 @@ export class Inbound {
       const caption = m.media.caption?.trim() || `I sent a ${m.media.kind === 'image' ? 'photo' : 'file'}.`;
       return `${caption}\n\n[Attached ${m.media.kind} saved at: ${file}]`;
     }
-    await chat.say('I can read text, photos, PDFs and documents and many more.');
     return null;
   }
 
@@ -221,7 +229,7 @@ export class Inbound {
       if (r.purpose === 'unlock') {
         this.lastUnlockPromptAt = 0;
         const queued = runs.queuedCount();
-        await chat.say(queued ? '🔓 Unlocked for today. Working on it…' : '🔓 Unlocked for today.');
+        await chat.say(queued ? '🔓 Unlocked. Working on it…' : '🔓 Unlocked.');
         session.ensure();
         void runs.drain();
       } else if (r.approvalId) {
@@ -337,14 +345,28 @@ export class Inbound {
       case '/help':
         await chat.say(HELP, { format: false });
         return;
-      case '/stop':
-        if (!session.busy) {
+      case '/stop': {
+        if (arg) return await this.onCommand(`/cancel ${arg}`);
+        const n = session.runningCount();
+        if (!n) {
           await chat.say('Nothing is running.');
           return;
         }
-        await chat.say('⏹️ Stopping…');
+        await chat.say(n > 1 ? `⏹️ Stopping ${n} tasks…` : '⏹️ Stopping…');
         await session.interrupt();
         return;
+      }
+      case '/queue':
+        await chat.say(runs.describe(), { format: false });
+        return;
+      case '/cancel': {
+        const n = Number(arg);
+        const prompt = Number.isInteger(n) && n > 0 ? await runs.cancel(n) : null;
+        await chat.say(
+          prompt ? `⏹️ Stopped: ${truncate(prompt.replace(/\s+/g, ' '), 60)}` : 'No such task. Send /queue for the numbers.',
+        );
+        return;
+      }
       case '/kill': {
         session.kill();
         const dropped = runs.clearQueued();
@@ -372,7 +394,7 @@ export class Inbound {
               ? `🔓 Unlocked${idleLeft}`
               : '🔒 Locked'
             : `⏸️ Off (${s.disabledReason ?? 'disabled'})`,
-          session.busy ? '⚙️ Working on a task' : '💤 Idle',
+          session.busy ? `⚙️ Running: ${session.runningCount()} of ${session.size}` : '💤 Idle',
           `📥 Queued: ${runs.queuedCount()}`,
           `🤝 Trusted mode: ${s.fullTrust ? 'full' : s.trusted ? 'on' : 'off'}`,
           `🧠 Model: ${info.model ?? this.d.ctx.config.OPERATOR_MODEL}${info.startedAt ? ` · conversation ${mins(now - info.startedAt)} old` : ''}`,
@@ -416,7 +438,7 @@ export class Inbound {
         return;
       case '/new':
         if (session.busy) {
-          await chat.say('A task is running. /stop it first.');
+          await chat.say('A task is running. /stop first.');
           return;
         }
         session.newSession();
@@ -431,10 +453,10 @@ export class Inbound {
         gate.setTrusted(arg === 'full' ? 'full' : arg === 'on');
         await chat.say(
           arg === 'full'
-            ? '🤝 Full trust on: commands, scripts and file edits run without asking. Sending, deleting, installing, network commands, changes outside your work folders and admin changes still ask, and so does anything after Claude reads an email or web page.'
+            ? '🤝 Full trust: I just do it. I still ask before sending, deleting, installing, paying, or opening a new site after reading a page.'
             : arg === 'on'
-              ? '🤝 Trusted mode on: file edits in work folders, sheet rows and Drive saves run without asking. Sends and commands still ask.'
-              : '🤝 Trusted mode off: every change asks first.',
+              ? '🤝 Trust on: edits and browsing run. Commands, sends and deletes ask.'
+              : '🤝 Trust off: every change asks first.',
         );
         return;
       default:

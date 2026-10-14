@@ -127,10 +127,10 @@ describe('PreToolUse gate', () => {
     expect(t.requests[0]?.reason).toMatch(/new website/);
   });
 
-  it('new MCP tools are recorded for the owner to confirm and run as HIGH', async () => {
+  it('new MCP tools are recorded for the owner to confirm; plain reads run without asking', async () => {
     const t = setup();
-    await t.call('mcp__claude_ai_Gmail__search_threads', { query: 'invoice' });
-    expect(t.requests[0]?.tier).toBe('HIGH');
+    expect((await t.call('mcp__claude_ai_Gmail__search_threads', { query: 'invoice' })).permissionDecision).toBe('allow');
+    expect(t.requests).toHaveLength(0);
     expect(t.ctx.db.select().from(toolTiers).all()[0]).toMatchObject({
       toolName: 'mcp__claude_ai_Gmail__search_threads',
       suggested: 'LOW',
@@ -151,10 +151,10 @@ describe('PreToolUse gate', () => {
 
   it('"Always" on a new risk-free MCP tool saves it, so it never asks again', async () => {
     const t = setup({ decision: 'approved', remember: true });
-    await t.call('mcp__claude_ai_Gmail__search_threads', { query: 'invoice' });
+    await t.call('mcp__tools__frobnicate', { query: 'invoice' });
     expect(t.requests[0]?.remember).toBe('✅ Always');
     expect(t.ctx.db.select().from(toolTiers).all()[0]?.tier).toBe('LOW');
-    await t.call('mcp__claude_ai_Gmail__search_threads', { query: 'bill' });
+    await t.call('mcp__tools__frobnicate', { query: 'bill' });
     expect(t.requests).toHaveLength(1);
   });
 

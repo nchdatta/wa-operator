@@ -25,6 +25,8 @@ export interface ApprovalRequest {
   input: Record<string, unknown>;
   tier: ApprovalTier;
   reason: string;
+  /** The task's request, shown on the card when several tasks run at once. */
+  task?: string;
   /** Offer a "remember" button (replaces ✏️ Edit) with this title, e.g. "✅ Always" or "✅ Today". */
   remember?: string;
 }
@@ -181,16 +183,17 @@ export function plainAction(toolName: string, input: Record<string, unknown>): s
 
 /** Tier reasons in plain words. */
 export function plainReason(reason: string): string {
-  if (/^new tool /.test(reason)) return 'Claude has not used this before';
-  if (/^unknown tool/.test(reason)) return 'Claude has not used this before';
+  if (/^new tool /.test(reason)) return 'first time using this tool';
+  if (/^unknown tool/.test(reason)) return 'first time using this tool';
+  if (/^change with /.test(reason)) return 'it changes something';
   if (/^browser /.test(reason)) return 'it acts in the browser';
   return reason.replace(/\(.*?wa-operator.*?\)/g, '').trim();
 }
 
 const HEADERS: Record<ApprovalTier, string> = {
-  MEDIUM: '🟦 OK to do this?',
-  HIGH: '🟧 Approve this action?',
-  CRITICAL: '🟥 Critical action. This may not be undoable.',
+  MEDIUM: '🟦 OK?',
+  HIGH: '🟧 Approve?',
+  CRITICAL: '🟥 Critical, may not be undoable.',
 };
 
 interface Waiter {
@@ -275,8 +278,9 @@ export class ApprovalEngine {
 
   private async sendCard(id: string, req: ApprovalRequest): Promise<void> {
     const minutes = Math.round(this.ttlMs / 60_000);
-    const body = `${HEADERS[req.tier]}\n\n${plainAction(req.toolName, req.input)}\n\nWhy: ${plainReason(req.reason)}`;
-    const footer = `Expires in ${minutes} min · ${id.slice(-6)}`;
+    const task = req.task ? `📌 ${truncate(req.task.replace(/\s+/g, ' '), 60)}\n` : '';
+    const body = `${HEADERS[req.tier]}\n${task}\n${plainAction(req.toolName, req.input)}\nWhy: ${plainReason(req.reason)}`;
+    const footer = `${minutes} min · ${id.slice(-6)}`;
     let cardId: string | null;
     if (req.tier === 'CRITICAL') {
       cardId = await this.chat.buttons(body, [{ id: approvalButton('r', id), title: '❌ Cancel' }], { footer });

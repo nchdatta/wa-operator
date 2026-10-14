@@ -83,17 +83,21 @@ export function classify(
   const base = classifyRaw(toolName, input, cwd, ctx);
   let { tier } = base;
   let reason = base.reason;
+  let risks = base.risks;
   // Taint: after outside content was read, anything that leaves the PC moves up one tier.
   if (ctx.tainted && tier !== 'DENY') {
     if (base.sends) {
       tier = bump(tier);
       reason += ' (after reading outside content)';
     } else if (base.domain && !isKnownDomain(base.domain, ctx.knownDomains)) {
-      tier = bump(tier);
-      reason += ` (new website ${base.domain} after reading outside content)`;
+      // A page could plant a link that carries data out in its URL, so a new website always asks,
+      // even in trusted mode. Approving it makes the site known for the rest of the task.
+      tier = maxTier('HIGH', tier);
+      risks = [...(risks ?? []), 'sends'];
+      reason = `new website ${base.domain} after reading outside content`;
     }
   }
-  return { ...base, tier, reason };
+  return { ...base, tier, reason, ...(risks ? { risks } : {}) };
 }
 
 function isKnownDomain(d: string, known: ReadonlySet<string>): boolean {
@@ -240,6 +244,7 @@ const SEND_WORDS = [
   'notify',
   'submit',
   'respond',
+  'upload',
 ];
 const DELETE_WORDS = ['delete', 'remove', 'trash', 'destroy', 'drop', 'revoke', 'cancel', 'archive', 'unsubscribe'];
 const WRITE_WORDS = [
@@ -415,9 +420,14 @@ function classifyMcp(toolName: string, input: Record<string, unknown>, cwd: stri
     };
   }
   const suggested = suggestMcpTier(toolName);
+  // A risk-free read or edit runs at its suggested tier straight away (reads run, edits follow trusted
+  // mode); only sends, deletes, scripts and unknown verbs wait for a first approval.
+  const plain = risks.length === 0 && (suggested === 'LOW' || suggested === 'MEDIUM');
   return {
-    tier: suggested === 'CRITICAL' ? 'CRITICAL' : 'HIGH',
-    reason: `new tool ${tool} (suggested ${suggested}; confirm on the PC with "wa-operator tiers")`,
+    tier: plain ? suggested : suggested === 'CRITICAL' ? 'CRITICAL' : 'HIGH',
+    reason: plain
+      ? `${suggested === 'LOW' ? 'read' : 'change'} with ${tool}`
+      : `new tool ${tool} (suggested ${suggested}; confirm on the PC with "wa-operator tiers")`,
     taints,
     sends,
     risks,
