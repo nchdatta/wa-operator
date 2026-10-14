@@ -14,6 +14,7 @@ import { RunQueue } from './operator/runs.js';
 import { OperatorSession } from './operator/session.js';
 import { Governor } from './runtime/governor.js';
 import { JobProcessor } from './runtime/jobs.js';
+import { Scheduler } from './runtime/scheduler.js';
 
 export interface OperatorApp {
   chat: OwnerChat;
@@ -25,6 +26,7 @@ export interface OperatorApp {
   runs: RunQueue;
   inbound: Inbound;
   processor: JobProcessor;
+  scheduler: Scheduler;
   /** Expire stale approvals, report interrupted runs, warm the session, start processing. */
   start(): Promise<void>;
   stop(): Promise<void>;
@@ -43,6 +45,7 @@ export function createOperatorApp(
   const questions = new OwnerQuestions(ctx.config.OPERATOR_APPROVAL_TTL_SECONDS * 1000);
   const session = new OperatorSession(ctx, chat, gate, approvals, governor, questions);
   const runs = new RunQueue(ctx, chat, gate, session, governor);
+  const scheduler = new Scheduler(ctx, chat, gate, runs);
   const operatorId = channel.name === 'telegram' ? ctx.config.TELEGRAM_OPERATOR_USER_ID! : ctx.config.OPERATOR_WA_ID!;
   const inbound = new Inbound({
     ctx,
@@ -82,6 +85,7 @@ export function createOperatorApp(
     runs,
     inbound,
     processor,
+    scheduler,
     async start() {
       for (const dir of [ctx.config.inbox, ctx.config.outbox]) fs.mkdirSync(dir, { recursive: true });
       gate.state();
@@ -89,10 +93,12 @@ export function createOperatorApp(
       if (expired) ctx.logger.info({ expired }, 'expired approvals left open by the last run');
       await runs.recover();
       processor.start();
+      scheduler.start();
       if (opts.warm !== false && gate.state().enabled) session.ensure();
     },
     async stop() {
       processor.stop();
+      scheduler.stop();
       await session.shutdown();
     },
   };

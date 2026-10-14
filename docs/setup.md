@@ -202,6 +202,23 @@ This puts [whisper.cpp](https://github.com/ggml-org/whisper.cpp) and the "small"
 - A voice note of 15 seconds takes a few seconds on a normal CPU.
 - Already run your own whisper server? Set `WHISPER_URL` instead.
 
+## Daily business assistant
+
+Everything below is stored in the encrypted database (SQLCipher); nothing is kept as plain files.
+
+| Say on WhatsApp | What happens |
+| --- | --- |
+| `/briefing 08:00` | Morning briefing every day: calendar, important emails, yesterday's sales, money owed. `/briefing off` stops it. |
+| `/summary 21:00` | End-of-day summary every day. Unfinished work is carried to the next day. |
+| "remind me Thursday 10am to pay the supplier" | One-time or repeating reminder (`/reminders` lists them). |
+| "every Saturday 9pm send me the weekly sales PDF" | Scheduled task, run by Claude at that time. |
+| "remember our rice supplier is Karim Traders" | Business memory, used in every later conversation (`/memory` lists it). |
+| "sold 3 bags rice 2400", "paid electricity 1850", "Karim owes 1000" | Sales, expense and money-owed ledger. A photo of a bill is recorded the same way. |
+| "save this as month close" | Saved routine; run it by name or from `/menu`. |
+| `/menu` | One-tap quick jobs (today's summary, money owed, screenshot, reminders) and your routines. |
+
+A scheduled task that runs while Operator Mode is locked can only read and report; anything that changes something waits until you unlock. Reminders are sent as they are. Nothing fires while Operator Mode is turned off.
+
 ## Browser control
 
 ```

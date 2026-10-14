@@ -35,14 +35,18 @@ export class RunQueue {
     return this.ctx.db.select({ n: count() }).from(operatorRuns).where(eq(operatorRuns.status, 'queued')).get()?.n ?? 0;
   }
 
-  async enqueue(prompt: string, sourceMessageId: string | null): Promise<string> {
+  async enqueue(
+    prompt: string,
+    sourceMessageId: string | null,
+    origin: 'owner' | 'schedule' = 'owner',
+  ): Promise<string> {
     const id = newId();
     const busy = this.session.busy || this.queuedCount() > 0;
     this.ctx.db
       .insert(operatorRuns)
-      .values({ id, status: 'queued', prompt, sourceMessageId, createdAt: this.ctx.clock.now() })
+      .values({ id, status: 'queued', origin, prompt, sourceMessageId, createdAt: this.ctx.clock.now() })
       .run();
-    if (busy) {
+    if (busy && origin === 'owner') {
       if (sourceMessageId) await this.chat.react(sourceMessageId, '📥');
       await this.chat.notify('📥 Queued, after the current task.', sourceMessageId ? { replyTo: sourceMessageId } : {});
     }
@@ -55,11 +59,17 @@ export class RunQueue {
     this.draining = true;
     try {
       for (;;) {
-        if (!this.gate.isUnlocked()) break; // queued runs wait for the next unlock
+        // While locked only scheduled runs go ahead (read-only, see the session gate); the owner's wait.
+        const unlocked = this.gate.isUnlocked();
+        if (!unlocked && !this.gate.state().enabled) break;
         const next = this.ctx.db
           .select()
           .from(operatorRuns)
-          .where(eq(operatorRuns.status, 'queued'))
+          .where(
+            unlocked
+              ? eq(operatorRuns.status, 'queued')
+              : and(eq(operatorRuns.status, 'queued'), eq(operatorRuns.origin, 'schedule')),
+          )
           .orderBy(asc(operatorRuns.createdAt))
           .limit(1)
           .get();
@@ -88,7 +98,12 @@ export class RunQueue {
     if (run.sourceMessageId) await this.chat.react(run.sourceMessageId, '⏳');
     let result: RunResult;
     try {
-      result = await this.session.runTask({ id: run.id, prompt: run.prompt, sourceMessageId: run.sourceMessageId });
+      result = await this.session.runTask({
+        id: run.id,
+        prompt: run.prompt,
+        sourceMessageId: run.sourceMessageId,
+        origin: run.origin,
+      });
     } catch (e) {
       result = {
         ok: false,

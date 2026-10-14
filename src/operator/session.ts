@@ -14,6 +14,8 @@ import {
 import { eq, isNotNull } from 'drizzle-orm';
 import type { ApprovalEngine } from '../approvals/engine.js';
 import { audit } from '../audit.js';
+import { createBusinessServer } from '../business/server.js';
+import { memoryBrief } from '../business/store.js';
 import type { OwnerChat } from '../channels/owner-chat.js';
 import type { AppContext } from '../context.js';
 import { operatorSessions, toolTiers } from '../persistence/schema.js';
@@ -61,6 +63,8 @@ export interface RunHandle {
   id: string;
   prompt: string;
   sourceMessageId: string | null;
+  /** schedule: started by a saved schedule. While locked it may only use LOW-tier tools. */
+  origin?: 'owner' | 'schedule';
 }
 
 export interface RunResult {
@@ -325,8 +329,15 @@ export class OperatorSession {
       mcpServers: {
         ...imported.servers,
         'whatsapp-out': createWhatsAppOutServer(this.ctx, this.chat, this.questions),
+        business: createBusinessServer(this.ctx),
       },
-      systemPrompt: { type: 'preset', preset: 'claude_code', append: operatorRules(c) },
+      systemPrompt: {
+        type: 'preset',
+        preset: 'claude_code',
+        append: `${operatorRules(c)}
+
+${memoryBrief(this.ctx)}`,
+      },
       disallowedTools: HARD_DENY,
       permissionMode: 'default',
       // Every call is decided by the hook; anything that still falls through to a prompt is denied
@@ -394,6 +405,14 @@ export class OperatorSession {
     if (c.unconfirmed) this.recordSeenTool(toolName);
     const meta = { tool: toolName, tier: c.tier, reason: c.reason, run: run.id, tainted: run.taint.tainted };
 
+    // A scheduled task while locked: reading and reporting only, nobody is there to approve.
+    if (run.origin === 'schedule' && !this.gate.isUnlocked() && c.tier !== 'LOW') {
+      audit(this.ctx, { actor: 'claude', action: 'tool.denied', outcome: 'locked_schedule', metadata: meta });
+      return decide(
+        'deny',
+        'Operator Mode is locked, so this scheduled task can only read and report. Do not try another way: finish the report and tell them in one line what still needs doing after they unlock.',
+      );
+    }
     let allowed = false;
     let reason = c.reason;
     const g = this.gate.state();
@@ -509,7 +528,7 @@ export class OperatorSession {
         if (msg.subtype === 'init') {
           this.storeSession(msg.session_id);
           for (const t of msg.tools)
-            if (t.startsWith('mcp__') && !t.startsWith('mcp__whatsapp-out__')) this.recordSeenTool(t);
+            if (t.startsWith('mcp__') && !/^mcp__(whatsapp-out|business)__/.test(t)) this.recordSeenTool(t);
           const failed = msg.mcp_servers.filter((s) => s.status !== 'connected' && s.status !== 'pending');
           this.failedServers = [
             ...this.failedServers.filter((s) => s.includes('(missing')),

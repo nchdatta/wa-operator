@@ -1,4 +1,4 @@
-import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { index, integer, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 /** Durable inbound work: verified webhook deliveries and Telegram updates. */
 export const jobs = sqliteTable(
@@ -71,6 +71,10 @@ export const operatorRuns = sqliteTable(
   {
     id: text('id').primaryKey(),
     status: text('status', { enum: ['queued', 'running', 'done', 'failed', 'stopped', 'interrupted'] }).notNull(),
+    /** schedule: started by a saved schedule; may run while locked, but then only LOW-tier tools. */
+    origin: text('origin', { enum: ['owner', 'schedule'] })
+      .notNull()
+      .default('owner'),
     prompt: text('prompt').notNull(),
     sourceMessageId: text('source_message_id'),
     sessionId: text('session_id'),
@@ -141,3 +145,67 @@ export const auditEvents = sqliteTable(
   },
   (t) => [index('audit_created').on(t.createdAt)],
 );
+
+// ---- Business assistant (all rows sit in the SQLCipher-encrypted database) ----------------------------
+
+/** Reminders (text sent as is) and scheduled tasks (run by Claude). */
+export const schedules = sqliteTable(
+  'schedules',
+  {
+    id: text('id').primaryKey(),
+    kind: text('kind', { enum: ['remind', 'task'] }).notNull(),
+    title: text('title').notNull(),
+    /** Reminder text, or the instruction for Claude. */
+    body: text('body').notNull(),
+    repeat: text('repeat', { enum: ['once', 'daily', 'weekly', 'monthly'] }).notNull(),
+    /** HH:MM in the business time zone. */
+    time: text('time').notNull(),
+    /** once: YYYY-MM-DD. weekly: days as 0-6 (Sunday = 0), comma separated. monthly: day of month. */
+    on: text('on'),
+    nextAt: integer('next_at'),
+    lastAt: integer('last_at'),
+    enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => [index('schedules_due').on(t.enabled, t.nextAt)],
+);
+
+/** Business memory: facts and preferences, and open tasks carried from day to day. */
+export const memories = sqliteTable('memories', {
+  id: text('id').primaryKey(),
+  kind: text('kind', { enum: ['fact', 'task'] }).notNull(),
+  text: text('text').notNull(),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+  doneAt: integer('done_at'),
+});
+
+/** Sales, expenses, purchases and money owed. */
+export const ledger = sqliteTable(
+  'ledger',
+  {
+    id: text('id').primaryKey(),
+    /** Business-time-zone date, YYYY-MM-DD. */
+    day: text('day').notNull(),
+    kind: text('kind', { enum: ['sale', 'expense', 'purchase', 'due', 'due_paid'] }).notNull(),
+    amount: real('amount').notNull(),
+    party: text('party'),
+    item: text('item'),
+    qty: real('qty'),
+    note: text('note'),
+    source: text('source', { enum: ['text', 'photo', 'voice'] })
+      .notNull()
+      .default('text'),
+    createdAt: integer('created_at').notNull(),
+    deletedAt: integer('deleted_at'),
+  },
+  (t) => [index('ledger_day').on(t.day), index('ledger_party').on(t.party)],
+);
+
+/** Saved routines: a short name for a longer instruction. */
+export const routines = sqliteTable('routines', {
+  name: text('name').primaryKey(),
+  prompt: text('prompt').notNull(),
+  uses: integer('uses').notNull().default(0),
+  createdAt: integer('created_at').notNull(),
+});

@@ -204,6 +204,7 @@ function classifyRaw(toolName: string, input: Record<string, unknown>, cwd: stri
 // ---- MCP tools ------------------------------------------------------------------------------------
 
 const OWN_SERVER = 'mcp__whatsapp-out__';
+export const BUSINESS_SERVER = 'mcp__business__';
 
 function words(name: string): string[] {
   return name
@@ -373,6 +374,19 @@ function classifyMcp(toolName: string, input: Record<string, unknown>, cwd: stri
         return { tier: 'MEDIUM', reason: 'file outside work folders', taints: false, sends: false };
     }
     return { tier: 'LOW', reason: 'reply to the owner', taints: false, sends: false };
+  }
+  if (toolName.startsWith(BUSINESS_SERVER)) {
+    // The owner's own encrypted records. After an email or web page was read, a change could be
+    // planted by that content (e.g. a scheduled task), so it asks first.
+    const reads = /_(list|report)$|^today$/.test(tool);
+    if (reads || !ctx.tainted) return { tier: 'LOW', reason: 'business records', taints: false, sends: false };
+    return {
+      tier: 'HIGH',
+      reason: 'business record change after reading outside content',
+      taints: false,
+      sends: false,
+      risks: ['schedules'],
+    };
   }
   const risks = mcpRisks(toolName);
 

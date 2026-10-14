@@ -1,5 +1,16 @@
 import type { ApprovalEngine } from './approvals/engine.js';
 import { audit } from './audit.js';
+import {
+  addSchedule,
+  describeSchedule,
+  getRoutine,
+  listMemory,
+  listRoutines,
+  listSchedules,
+  removeSchedule,
+  useRoutine,
+} from './business/store.js';
+import { parseTime } from './business/time.js';
 import type { OwnerMessage } from './channels/channel.js';
 import type { OwnerChat } from './channels/owner-chat.js';
 import type { AppContext } from './context.js';
@@ -25,13 +36,53 @@ import { errMsg } from './shared/errors.js';
 const UNLOCK_PROMPT_COOLDOWN = 60_000;
 
 const HELP = `Operator Mode commands:
+/menu – quick jobs and your saved routines
+/reminders – reminders and scheduled tasks
+/memory – what I remember about the business
+/briefing 08:00 – morning briefing every day (/briefing off to stop)
+/summary 21:00 – end-of-day summary every day (/summary off to stop)
 /stop – stop the current task
 /status – what's going on
 /new – start a fresh conversation
 /trust on|full|off – on: edits run without asking; full: commands too (sends/deletes still ask)
 /lock – lock until the next PIN
 /kill – stop everything and lock
-Anything else is an instruction for the PC.`;
+Anything else is an instruction for the PC. Examples: "remind me Thursday 10am to pay the supplier", "sold 3 bags of rice 2400", "save this as month close".`;
+
+const BRIEFING = `Morning briefing. Keep it short, phone-sized:
+1. Today's calendar and anything due today (open tasks, reminders).
+2. Important unread emails from the last day (one line each, skip newsletters and promotions).
+3. Yesterday's sales, expenses and net from the ledger, and the money owed list total.
+4. Anything that needs my decision today.
+Skip any part whose service is not connected, without comment.`;
+
+const SUMMARY = `End-of-day summary. Keep it short, phone-sized:
+1. Today's sales, expenses and net from the ledger.
+2. What was done today, and what is still open (carry unfinished work forward as open tasks).
+3. Reminders and scheduled tasks for tomorrow.`;
+
+/** Quick jobs on /menu (title ≤ 24 characters). */
+const MENU: { id: string; title: string; description: string; prompt?: string }[] = [
+  {
+    id: 'menu:today',
+    title: "Today's summary",
+    description: 'Sales, expenses, money owed',
+    prompt: "Give me today's business summary from the ledger: sales, expenses, net, and money owed.",
+  },
+  {
+    id: 'menu:dues',
+    title: 'Money owed',
+    description: 'Who owes how much',
+    prompt: 'Who owes us money? Biggest first.',
+  },
+  {
+    id: 'menu:shot',
+    title: 'Screenshot',
+    description: 'See the PC screen',
+    prompt: 'Take a screenshot and send it to me.',
+  },
+  { id: 'menu:remind', title: 'Reminders', description: 'Reminders and schedules' },
+];
 
 export interface InboundDeps {
   ctx: AppContext;
@@ -209,15 +260,80 @@ export class Inbound {
   }
 
   private async onButton(id: string): Promise<void> {
+    if (id.startsWith('menu:')) return await this.onMenu(id);
     if (await this.d.approvals.onButton(id)) return;
     if (this.d.questions.onButton(id)) return;
     await this.d.chat.say('⌛ That button is no longer active.');
+  }
+
+  private async onMenu(id: string): Promise<void> {
+    const { ctx, chat, runs, gate } = this.d;
+    if (id === 'menu:remind') return await this.onCommand('/reminders');
+    let prompt = MENU.find((m) => m.id === id)?.prompt;
+    if (id.startsWith('menu:r:')) {
+      const r = getRoutine(ctx, id.slice('menu:r:'.length));
+      if (r) {
+        useRoutine(ctx, r.name);
+        prompt = `Run my saved routine "${r.name}":\n${r.prompt}`;
+      }
+    }
+    if (!prompt) {
+      await chat.say('⌛ That menu item is no longer there. Send /menu again.');
+      return;
+    }
+    await runs.enqueue(prompt, null);
+    if (!gate.isUnlocked()) await this.requestUnlock();
+  }
+
+  private async sendMenu(): Promise<void> {
+    const rows = [
+      ...MENU.map(({ id, title, description }) => ({ id, title, description })),
+      ...listRoutines(this.d.ctx)
+        .slice(0, 10 - MENU.length)
+        .map((r) => ({
+          id: `menu:r:${r.name}`,
+          title: truncate(r.name, 24),
+          description: truncate(r.prompt.replace(/\s+/g, ' '), 72),
+        })),
+    ];
+    await this.d.chat.list('What do you need?', 'Menu', rows);
+  }
+
+  /** /briefing and /summary: one fixed daily task each, replaced on every change. */
+  private async setDaily(id: 'briefing' | 'summary', arg: string): Promise<void> {
+    const { ctx, chat } = this.d;
+    const name = id === 'briefing' ? 'Morning briefing' : 'End-of-day summary';
+    if (arg === 'off') {
+      await chat.say(removeSchedule(ctx, id) ? `${name} turned off.` : `${name} was not on.`);
+      return;
+    }
+    const t = parseTime(arg || (id === 'briefing' ? '08:00' : '21:00'));
+    if (!t) {
+      await chat.say(`Use /${id} 08:00 (24-hour time) or /${id} off.`);
+      return;
+    }
+    const time = `${String(t.hh).padStart(2, '0')}:${String(t.mm).padStart(2, '0')}`;
+    const s = addSchedule(ctx, {
+      id,
+      kind: 'task',
+      title: name,
+      body: id === 'briefing' ? BRIEFING : SUMMARY,
+      repeat: 'daily',
+      time,
+    });
+    await chat.say(
+      `✅ ${describeSchedule(ctx, s)}\nIf Operator Mode is locked then, it only reads and reports; nothing is changed.`,
+      { format: false },
+    );
   }
 
   private async onCommand(text: string): Promise<void> {
     const { gate, chat, session, runs, governor } = this.d;
     const [cmd = '', arg = ''] = text.toLowerCase().split(/\s+/);
     switch (cmd) {
+      case '/menu':
+        await this.sendMenu();
+        return;
       case '/help':
         await chat.say(HELP, { format: false });
         return;
@@ -274,6 +390,30 @@ export class Inbound {
       return;
     }
     switch (cmd) {
+      case '/reminders': {
+        const rows = listSchedules(this.d.ctx);
+        await chat.say(
+          rows.length
+            ? `${rows.map((s) => describeSchedule(this.d.ctx, s)).join('\n')}\n\nTo cancel one, say "cancel reminder" and its id.`
+            : 'No reminders or scheduled tasks. Try: "remind me Friday 6pm to call the supplier".',
+          { format: false },
+        );
+        return;
+      }
+      case '/memory': {
+        const rows = listMemory(this.d.ctx);
+        await chat.say(
+          rows.length
+            ? `${rows.map((r) => `[${r.id}] ${r.kind === 'task' ? '📌' : '•'} ${r.text}`).join('\n')}\n\nTo remove one, say "forget" and its id.`
+            : 'Nothing remembered yet. Try: "remember that our supplier for rice is Karim Traders".',
+          { format: false },
+        );
+        return;
+      }
+      case '/briefing':
+      case '/summary':
+        await this.setDaily(cmd === '/briefing' ? 'briefing' : 'summary', arg);
+        return;
       case '/new':
         if (session.busy) {
           await chat.say('A task is running. /stop it first.');
