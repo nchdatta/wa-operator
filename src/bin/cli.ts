@@ -440,11 +440,15 @@ program
     }
     const QRCode = (await import('qrcode')).default;
     const ch = new BaileysChannel(config, silentLogger);
-    const pairPhone = o.pair?.replace(/D/g, '');
+    const pairPhone = o.pair?.replace(/\D/g, '');
     console.log('On the Operator phone: WhatsApp → Settings → Linked devices → Link a device.');
     await ch.connect({
       ...(pairPhone ? { pairPhone } : {}),
-      onQr: (qr) => void QRCode.toString(qr, { type: 'terminal', small: true }).then((s) => console.log(s)),
+      // Low error correction and a 1-module border: the smallest code a phone still scans.
+      onQr: (qr) =>
+        void QRCode.toString(qr, { type: 'terminal', small: true, errorCorrectionLevel: 'L', margin: 1 }).then((s) =>
+          console.log(s),
+        ),
       onPairingCode: (code) => console.log(`Pairing code: ${code}  (tap "Link with phone number instead")`),
     });
     // Let the first creds sync finish before closing.
