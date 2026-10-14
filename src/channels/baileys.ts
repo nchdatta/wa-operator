@@ -46,12 +46,36 @@ export function baileysAuthDir(config: Config): string {
     : path.join(config.dataDir, 'baileys-auth');
 }
 
-/** Baileys wants a pino-like logger; give it a quiet child of ours. */
+/** Baileys wants a pino-like logger; give it a quiet child of ours (its warnings are mostly routine retries). */
 function socketLogger(logger: Logger) {
+  quietSignal(logger);
   const child = logger.child({ mod: 'baileys' });
-  child.level = 'warn';
+  child.level = 'error';
   return child;
 }
+
+/**
+ * libsignal (inside Baileys) prints every encryption-session change straight to the console
+ * ("Closing session: SessionEntry {...}" with key bytes). That is normal key rotation, not an error:
+ * drop it, and keep only a one-line debug entry for decryption trouble.
+ */
+const SIGNAL_NOISE =
+  /^(Closing session|Opening session|Removing old closed session|Session already (closed|open)|Migrating session|Closing open session|Closing stale open session|Decrypted message with closed session|Failed to decrypt message|Session error)/;
+let signalQuieted = false;
+/* eslint-disable no-console -- filters console output from a dependency */
+function quietSignal(logger: Logger): void {
+  if (signalQuieted) return;
+  signalQuieted = true;
+  for (const level of ['log', 'info', 'warn', 'error'] as const) {
+    const original = console[level].bind(console);
+    console[level] = (...args: unknown[]) => {
+      const first = typeof args[0] === 'string' ? args[0] : '';
+      if (!SIGNAL_NOISE.test(first)) return original(...args);
+      if (/decrypt|Session error/i.test(first)) logger.debug({ mod: 'signal' }, first.slice(0, 120));
+    };
+  }
+}
+/* eslint-enable no-console */
 
 export interface BaileysConnectOpts {
   /** Called with each QR string while not linked. */
