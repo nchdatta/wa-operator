@@ -14,7 +14,9 @@ export function ensureDataKey(existing?: string): string {
   const stored = readSecrets(['OPERATOR_DATA_KEY']).OPERATOR_DATA_KEY;
   if (stored && HEX_KEY.test(stored)) return stored;
   if (!secretStoreAvailable())
-    throw new Error('No OPERATOR_DATA_KEY: secret store is off, so set it (64 hex characters) as an environment variable.');
+    throw new Error(
+      'No OPERATOR_DATA_KEY: secret store is off, so set it (64 hex characters) as an environment variable.',
+    );
   const key = crypto.randomBytes(32).toString('hex');
   writeSecret('OPERATOR_DATA_KEY', key);
   return key;

@@ -10,6 +10,7 @@ import { appRoot } from '../config/env.js';
 import { MetaClient } from '../meta/client.js';
 import { silentLogger } from '../observability/logger.js';
 import { installAutostart, TUNNEL_NAME } from '../platform/autostart.js';
+import { installVoice } from '../platform/whisper-install.js';
 import { readSecrets, SECRET_NAMES, secretStoreName, writeSecret, type SecretName } from '../security/secrets.js';
 import { ask, askHidden, confirm } from '../shared/prompt.js';
 
@@ -36,6 +37,7 @@ const STEPS = [
   'flow',
   'templates',
   'pin',
+  'voice',
   'tunnel',
   'autostart',
   'webhook',
@@ -322,6 +324,24 @@ const steps: Record<Step, () => Promise<void>> = {
   async pin() {
     log.step('Owner PIN');
     run('node', [path.join(ROOT, 'dist', 'bin', 'cli.js'), 'set-pin']);
+  },
+
+  async voice() {
+    log.step('Voice notes (speech to text on this PC, whisper.cpp)');
+    const e = readEnv();
+    if (
+      !(await confirm(
+        e.WHISPER_MODEL
+          ? 'Voice notes are set up. Check or repair them?'
+          : 'Set up voice notes? (downloads about 500 MB)',
+        !e.WHISPER_MODEL,
+      ))
+    )
+      return;
+    const lang = await ask('Spoken language: auto (any), bn (Bangla) or en', e.WHISPER_LANG ?? 'auto');
+    const t = await installVoice(ROOT, 'small', (s) => log.ok(s));
+    setEnv({ WHISPER_BIN: t.bin, WHISPER_MODEL: t.model, FFMPEG_BIN: t.ffmpeg, WHISPER_LANG: lang });
+    log.ok('voice notes on; the service starts whisper itself (restart it: npm run restart)');
   },
 
   async tunnel() {

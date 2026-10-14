@@ -613,10 +613,7 @@ export function analyzeShell(command: string, flavor: ShellFlavor, cwd: string, 
     if (pathVerdicts.some((p) => p.verdict === 'deny')) raise('DENY', 'touches a blocked path');
     const outside = pathVerdicts.some((p) => p.verdict === 'outside');
 
-    if (
-      ENV_DUMP.has(name) &&
-      (words.length === 0 || CRED_TOOLS.has(name) || /^-p$/.test(words[0]?.v ?? ''))
-    )
+    if (ENV_DUMP.has(name) && (words.length === 0 || CRED_TOOLS.has(name) || /^-p$/.test(words[0]?.v ?? '')))
       raise('DENY', 'dumps environment or stored credentials');
     else if (name === 'env' && words.length === 0) raise('DENY', 'dumps environment');
     else if (name === 'git' && (words[0]?.v ?? '').toLowerCase() === 'push') raise('CRITICAL', 'git push', 'network');

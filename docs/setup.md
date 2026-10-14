@@ -187,15 +187,20 @@ If Meta's terms tighten, switch the owner to a Telegram bot the same day. Nothin
 
 On Telegram, the owner replies to the PIN prompt with the PIN, and the bot deletes that message the moment it arrives.
 
-## Optional: real voice notes
+## Voice notes
 
-Phone keyboard voice typing works without any setup (Gboard and Samsung support Bangla). For actual voice notes, run a [whisper.cpp](https://github.com/ggml-org/whisper.cpp) server on the PC:
+Phone keyboard voice typing works without any setup (Gboard and Samsung support Bangla). For real voice notes:
 
-```powershell
-whisper-server -m models\ggml-small.bin --host 127.0.0.1 --port 8178 --convert
+```
+npm run setup -- --only voice
+npm run restart
 ```
 
-Then set `WHISPER_URL=http://127.0.0.1:8178`. Each transcript is echoed back as "I heard: …" first.
+This puts [whisper.cpp](https://github.com/ggml-org/whisper.cpp) and the "small" speech model (about 470 MB, checksum-verified) in `tools/whisper`, and installs ffmpeg (winget, Homebrew; on Linux `sudo apt install ffmpeg` first). The service then starts and stops whisper itself, listening on this PC only, so audio never leaves it. Each transcript is echoed back as "I heard: …" first.
+
+- `WHISPER_LANG`: `auto` (default), or `bn` / `en` if short Bangla notes get detected as the wrong language.
+- A voice note of 15 seconds takes a few seconds on a normal CPU.
+- Already run your own whisper server? Set `WHISPER_URL` instead.
 
 ## Quarterly check
 

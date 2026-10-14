@@ -37,12 +37,17 @@ export async function saveToInbox(
 }
 
 /** POST the audio to whisper.cpp's /inference endpoint (start the server with --convert for OGG/Opus). */
-export async function transcribe(whisperUrl: string, file: string, fetchImpl: typeof fetch = fetch): Promise<string> {
+export async function transcribe(
+  whisperUrl: string,
+  file: string,
+  fetchImpl: typeof fetch = fetch,
+  language = 'auto',
+): Promise<string> {
   const form = new FormData();
   const data = await fs.promises.readFile(file);
   form.set('file', new Blob([new Uint8Array(data)]), path.basename(file));
   form.set('response_format', 'json');
-  form.set('language', 'auto');
+  form.set('language', language);
   const res = await fetchImpl(`${whisperUrl.replace(/\/$/, '')}/inference`, {
     method: 'POST',
     body: form,

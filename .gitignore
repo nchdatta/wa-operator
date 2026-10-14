@@ -11,3 +11,4 @@ backups/
 *.db-wal
 *.db-shm
 config/mcp.json
+tools/

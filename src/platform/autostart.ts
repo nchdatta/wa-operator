@@ -325,7 +325,7 @@ function killLeftovers(root: string, port: number): number {
   const procs: { pid: number; cmd: string }[] = [];
   if (WIN) {
     const r = ps(
-      `Get-CimInstance Win32_Process -Filter "Name='node.exe' or Name='cloudflared.exe'" | ForEach-Object { "$($_.ProcessId)\`t$($_.CommandLine)" }`,
+      `Get-CimInstance Win32_Process -Filter "Name='node.exe' or Name='cloudflared.exe' or Name='whisper-server.exe'" | ForEach-Object { "$($_.ProcessId)\`t$($_.CommandLine)" }`,
     );
     for (const l of r.out.split(/\r?\n/)) {
       const [pid, cmd] = l.split('\t');
@@ -342,7 +342,7 @@ function killLeftovers(root: string, port: number): number {
   const mine = procs.filter(
     ({ pid, cmd }) =>
       pid !== process.pid &&
-      ((norm(cmd).includes(rootN) && /service\.(js|ts)/.test(cmd)) ||
+      ((norm(cmd).includes(rootN) && /service\.(js|ts)|whisper-server/.test(cmd)) ||
         (/cloudflared/i.test(cmd) &&
           (cmd.includes(`127.0.0.1:${port}`) ||
             cmd.includes(`localhost:${port}`) ||

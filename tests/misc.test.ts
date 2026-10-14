@@ -52,7 +52,7 @@ describe('uninstall --purge', () => {
   it('never deletes .env', () => {
     const root = tempDir();
     const paths = purgePaths(root);
-    expect(paths.map((p) => path.basename(p))).toEqual(['data', 'logs', 'dist']);
+    expect(paths.map((p) => path.basename(p))).toEqual(['data', 'logs', 'dist', 'tools']);
     expect(paths.some((p) => p.includes('.env'))).toBe(false);
   });
 });

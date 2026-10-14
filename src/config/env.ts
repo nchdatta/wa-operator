@@ -67,6 +67,14 @@ const EnvSchema = z
     OPERATOR_REPLY_TEMPLATE_LANG: z.string().default('en'),
     /** Optional whisper.cpp server (e.g. http://127.0.0.1:8178) for real voice notes. */
     WHISPER_URL: z.url().optional(),
+    /** whisper-server program and model: the service starts it itself (set by `npm run setup -- --only voice`). */
+    WHISPER_BIN: z.string().optional(),
+    WHISPER_MODEL: z.string().optional(),
+    WHISPER_PORT: int(1, 65535).default(8178),
+    /** Spoken language: auto, or a code like bn / en. */
+    WHISPER_LANG: z.string().default('auto'),
+    /** ffmpeg (WhatsApp voice notes are OGG/Opus), if it is not on PATH. */
+    FFMPEG_BIN: z.string().optional(),
 
     // Business (scope guard)
     BUSINESS_NAME: z.string().min(1).max(100).default('the business'),

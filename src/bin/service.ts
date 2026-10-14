@@ -13,6 +13,7 @@ import { createLogger } from '../observability/logger.js';
 import { openDb } from '../persistence/db.js';
 import { storeJob } from '../runtime/jobs.js';
 import { TunnelManager } from '../runtime/tunnel.js';
+import { WhisperManager } from '../runtime/whisper.js';
 import { ensureDataKey } from '../security/data-key.js';
 import { SECRET_NAMES } from '../security/secrets.js';
 import { systemClock } from '../shared/clock.js';
@@ -41,6 +42,9 @@ async function main(): Promise<void> {
       'CLAUDE_CODE_OAUTH_TOKEN is not stored; using the existing Claude Code login. Run "wa-operator secret set CLAUDE_CODE_OAUTH_TOKEN".',
     );
   }
+  // Voice notes: run the local whisper server alongside, so start/stop covers it too.
+  const whisper = WhisperManager.wanted(config) ? new WhisperManager(config, logger) : undefined;
+  if (whisper) config.WHISPER_URL = whisper.url;
   const db = openDb(config.databasePath, ensureDataKey(config.OPERATOR_DATA_KEY));
   const secrets = SECRET_NAMES.map((n) => config[n]).filter((v): v is string => !!v);
   const ctx: AppContext = { config, db, logger, clock: systemClock, secrets };
@@ -110,6 +114,7 @@ async function main(): Promise<void> {
     });
   }
 
+  whisper?.start();
   await app.start();
   await tunnel?.start();
   void poller?.run();
@@ -119,6 +124,7 @@ async function main(): Promise<void> {
     poller?.stop();
     if (channel instanceof BaileysChannel) channel.stop();
     tunnel?.stop();
+    whisper?.stop();
     server.close();
     await app.stop();
     db.$client.close();

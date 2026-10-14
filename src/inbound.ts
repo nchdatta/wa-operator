@@ -140,7 +140,7 @@ export class Inbound {
           );
           return null;
         }
-        const heard = await transcribe(ctx.config.WHISPER_URL, file, this.d.fetchImpl);
+        const heard = await transcribe(ctx.config.WHISPER_URL, file, this.d.fetchImpl, ctx.config.WHISPER_LANG);
         if (!heard) {
           await chat.say("🎙️ I couldn't make out that voice note. Please type it or try again.");
           return null;
