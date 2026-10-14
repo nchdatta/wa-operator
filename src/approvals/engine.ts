@@ -192,7 +192,7 @@ const PLAIN_REASONS: [RegExp, string][] = [
   [/registry|admin|system|service|scheduled task/, 'it changes PC settings'],
   [/schedules/, 'it sets up a repeating job'],
   [/git push|network|new website|internet/, 'it goes on the internet'],
-  [/outside/, 'it touches files outside your work folders'],
+  [/outside (?:the |your )?work|outside work/, 'it touches files outside your work folders'],
   [/^new tool|^unknown tool/, 'first time using this tool'],
   [/runs other code|unknown program|variable|grouping|chained|substitution|encoded|redirect|changes files/, 'it runs a script on your PC'],
   [/^change with|record change|edit /, 'it changes something'],

@@ -30,3 +30,12 @@ describe('everyday phrases', () => {
     expect(parseYesNo('ok and also check the price list')).toBeNull();
   });
 });
+
+describe('site names', () => {
+  it('"open chatgpt" makes chatgpt.com a known site for the task', async () => {
+    const { domainsIn } = await import('../src/operator/tiers.js');
+    expect(domainsIn('open chatgpt and make a banner')).toContain('chatgpt.com');
+    expect(domainsIn('check my linkedin')).toContain('linkedin.com');
+    expect(domainsIn('sold 3 bags rice')).toEqual([]);
+  });
+});

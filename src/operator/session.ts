@@ -229,8 +229,12 @@ function describeTool(name: string, input: Record<string, unknown>): string {
     case 'Task':
       return 'Working on a sub-task';
   }
+  if (isBrowserTool(name)) return 'Working in the browser';
   if (name.startsWith('mcp__')) {
     const [, server, tool] = name.split('__');
+    if (/gmail/i.test(server ?? '')) return 'Checking your email';
+    if (/calendar/i.test(server ?? '')) return 'Checking your calendar';
+    if (server === 'business') return 'Checking your records';
     return `Using ${(server ?? '').replace(/^claude_ai_/, '')} (${(tool ?? '').replace(/_/g, ' ')})`;
   }
   return 'Working';

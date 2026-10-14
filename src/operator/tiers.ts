@@ -57,8 +57,25 @@ export function domainsIn(text: string): string[] {
     const d = domainOf(m[1]!.startsWith('http') ? m[1]! : `https://${m[1]}`);
     if (d) out.add(d);
   }
+  // People say "open chatgpt", not "open chatgpt.com".
+  const t = text.toLowerCase();
+  for (const [re, sites] of SITE_NAMES) if (re.test(t)) for (const s of sites) out.add(s);
   return [...out];
 }
+
+const SITE_NAMES: [RegExp, string[]][] = [
+  [/\bchat ?gpt\b|\bopenai\b/, ['chatgpt.com', 'openai.com', 'oaiusercontent.com']],
+  [/\bfacebook\b|\bfb\b|\bmessenger\b/, ['facebook.com', 'fbcdn.net', 'messenger.com']],
+  [/\blinked ?in\b/, ['linkedin.com', 'licdn.com']],
+  [/\binstagram\b|\binsta\b/, ['instagram.com']],
+  [/\byoutube\b/, ['youtube.com']],
+  [/\bgmail\b|\bgoogle\b|\bdrive\b|\bsheets?\b/, ['google.com']],
+  [/\bclaude\b/, ['claude.ai']],
+  [/\bgemini\b/, ['gemini.google.com']],
+  [/\bcanva\b/, ['canva.com']],
+  [/\bdaraz\b/, ['daraz.com.bd']],
+  [/\bprothom ?alo\b|প্রথম আলো/, ['prothomalo.com']],
+];
 
 /** Windows marks downloaded files with a Zone.Identifier stream (Mark of the Web). */
 export function fromInternet(real: string): boolean {
