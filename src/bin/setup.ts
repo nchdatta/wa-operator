@@ -38,6 +38,7 @@ const STEPS = [
   'templates',
   'pin',
   'voice',
+  'browser',
   'tunnel',
   'autostart',
   'webhook',
@@ -342,6 +343,34 @@ const steps: Record<Step, () => Promise<void>> = {
     const t = await installVoice(ROOT, 'small', (s) => log.ok(s));
     setEnv({ WHISPER_BIN: t.bin, WHISPER_MODEL: t.model, FFMPEG_BIN: t.ffmpeg, WHISPER_LANG: lang });
     log.ok('voice notes on; the service starts whisper itself (restart it: npm run restart)');
+  },
+
+  async browser() {
+    log.step('Browser control (Claude in Chrome extension)');
+    const e = readEnv();
+    console.log('  Lets the operator use Chrome on this PC: open sites, fill forms, read pages.');
+    console.log('  It uses the real Chrome profile, so it can see sites you are logged in to.');
+    console.log('  Every browser action still asks the owner for approval on WhatsApp.');
+    if (
+      !(await confirm(
+        e.OPERATOR_BROWSER === 'true' ? 'Browser control is on. Keep it on?' : 'Turn on browser control?',
+        e.OPERATOR_BROWSER === 'true',
+      ))
+    ) {
+      setEnv({ OPERATOR_BROWSER: 'false' });
+      log.ok('browser control off');
+      return;
+    }
+    const store = 'https://chromewebstore.google.com/detail/claude/fcoeoabgfenejglbffodgkkbkcdhcgfn';
+    if (WIN) run('cmd', ['/c', 'start', 'chrome', store], { quiet: true });
+    else run(MAC ? 'open' : 'xdg-open', MAC ? ['-a', 'Google Chrome', store] : [store], { quiet: true });
+    console.log('  Chrome opened the extension page. In Chrome:');
+    console.log('    1. Click "Add to Chrome", then "Add extension".');
+    console.log('    2. Click the Claude icon and sign in with the same Claude account as this PC.');
+    console.log(`  If Chrome did not open, open this page yourself: ${store}`);
+    await ask('Press Enter when the extension is added and signed in', '');
+    setEnv({ OPERATOR_BROWSER: 'true' });
+    log.ok('browser control on (restart the service: npm run restart). Keep Chrome open for it to work.');
   },
 
   async tunnel() {

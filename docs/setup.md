@@ -202,6 +202,15 @@ This puts [whisper.cpp](https://github.com/ggml-org/whisper.cpp) and the "small"
 - A voice note of 15 seconds takes a few seconds on a normal CPU.
 - Already run your own whisper server? Set `WHISPER_URL` instead.
 
+## Browser control
+
+```
+npm run setup -- --only browser
+npm run restart
+```
+
+Opens the Claude in Chrome extension page. Add the extension and sign in with the same Claude account as this PC, then setup sets `OPERATOR_BROWSER=true`. The operator then drives the real Chrome profile (logged-in sites included), so every browser action asks the owner for approval. Chrome must be open for it to work. Turn it off with `OPERATOR_BROWSER=false` in `.env`.
+
 ## Quarterly check
 
 Re-read Meta's WhatsApp Business Solution Terms every quarter. If they tighten against internal AI tools, switch to Telegram.

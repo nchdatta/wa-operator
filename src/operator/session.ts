@@ -339,6 +339,7 @@ export class OperatorSession {
         // The hook waits for the owner's tap: allow a little more than the approval TTL.
         PreToolUse: [{ hooks: [gateHook], timeout: c.OPERATOR_APPROVAL_TTL_SECONDS + 15 }],
       },
+      ...(c.OPERATOR_BROWSER ? { extraArgs: { chrome: null } } : {}),
       maxTurns: c.OPERATOR_MAX_TURNS,
       effort: 'medium',
       env,

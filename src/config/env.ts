@@ -55,6 +55,8 @@ const EnvSchema = z
     OPERATOR_EXTRA_DENY: csv.default([]),
     /** Operator Mode refuses to run elevated unless this is set. */
     OPERATOR_ALLOW_ADMIN: bool.default(false),
+    // Claude in Chrome: lets the operator drive the owner's real Chrome (every action still needs approval).
+    OPERATOR_BROWSER: bool.default(false),
     /** WhatsApp Flow with a password field, used for the PIN (config/flows/pin-flow.json). */
     OPERATOR_PIN_FLOW_ID: digits.optional(),
     /** draft = send the unpublished Flow (testing, or until the business passes Meta's integrity check). */
