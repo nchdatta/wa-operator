@@ -73,10 +73,10 @@ const EnvSchema = z
     BUSINESS_DESCRIPTION: z.string().max(500).default(''),
     BUSINESS_TIMEZONE: z.string().default('Asia/Dhaka'),
 
-    // Claude subscription (from `claude setup-token`; kept in Windows Credential Manager)
+    // Claude subscription (from `claude setup-token`; kept in the system secret store)
     CLAUDE_CODE_OAUTH_TOKEN: z.string().min(20).optional(),
 
-    /** Data encryption key (64 hex). Made automatically and kept in Credential Manager. */
+    /** Data encryption key (64 hex). Made automatically and kept in the system secret store. */
     OPERATOR_DATA_KEY: z
       .string()
       .regex(/^[0-9a-f]{64}$/, '64 hex characters')
@@ -96,7 +96,7 @@ const EnvSchema = z
      */
     TUNNEL_MODE: z.enum(['quick', 'named', 'none']).default('none'),
     PUBLIC_HOSTNAME: z.string().optional(),
-    /** Path to cloudflared.exe if it is not on PATH. */
+    /** Path to cloudflared if it is not on PATH. */
     CLOUDFLARED_BIN: z.string().optional(),
     WHATSAPP_API_VERSION: z
       .string()
@@ -198,7 +198,7 @@ export function buildConfig(env: Record<string, string | undefined>, baseDir: st
 
 /**
  * Load config from `DOTENV_CONFIG_PATH` (or `./.env`), then real environment variables, then secrets
- * from Windows Credential Manager (which win, so tokens never need to sit in `.env`).
+ * from the system secret store: Credential Manager, Keychain or keyring (which win, so tokens never need to sit in `.env`).
  */
 export function loadConfig(opts: { secrets?: boolean } = {}): Config {
   const envPath = path.resolve(process.env.DOTENV_CONFIG_PATH ?? '.env');

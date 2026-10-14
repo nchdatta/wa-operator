@@ -467,6 +467,12 @@ const RUNS_CODE = new Set([
   'runas',
   'schtasks',
   'register-scheduledtask',
+  'launchctl',
+  'systemctl',
+  'crontab',
+  'osascript',
+  'doas',
+  'pkexec',
   'new-service',
   'set-alias',
   'new-alias',
@@ -496,7 +502,11 @@ const ENV_DUMP = new Set([
   'dir-env',
   'cmdkey',
   'vaultcmd',
+  'security',
+  'secret-tool',
 ]);
+/** Credential stores: any use is blocked, not only a bare dump. */
+const CRED_TOOLS = new Set(['cmdkey', 'vaultcmd', 'security', 'secret-tool']);
 
 function cmdName(word: string): string {
   const base = word.split(/[\\/]/).pop()!.toLowerCase();
@@ -605,7 +615,7 @@ export function analyzeShell(command: string, flavor: ShellFlavor, cwd: string, 
 
     if (
       ENV_DUMP.has(name) &&
-      (words.length === 0 || name === 'cmdkey' || name === 'vaultcmd' || /^-p$/.test(words[0]?.v ?? ''))
+      (words.length === 0 || CRED_TOOLS.has(name) || /^-p$/.test(words[0]?.v ?? ''))
     )
       raise('DENY', 'dumps environment or stored credentials');
     else if (name === 'env' && words.length === 0) raise('DENY', 'dumps environment');

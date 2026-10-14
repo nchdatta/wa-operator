@@ -68,7 +68,7 @@ npm run dev        # service with tsx
 
 | Phase | Status |
 | --- | --- |
-| 1 · Ask and read | Built: webhook and job queue, `channels/` (WhatsApp and Telegram), PIN gate through a Flow, parsed shell commands, real-path checks, Credential Manager secrets, warm session with resume, files back, `/stop` and `/status`, autostart script, watcher |
+| 1 · Ask and read | Built: webhook and job queue, `channels/` (WhatsApp and Telegram), PIN gate through a Flow, parsed shell commands, real-path checks, OS secret store (Credential Manager, Keychain, keyring), warm session with resume, files back, `/stop` and `/status`, autostart script, watcher |
 | 2 · Approvals | Built: MEDIUM/HIGH/CRITICAL engine with 5-minute expiry and hook timeout, ✏️ Edit, trusted mode, taint, screenshot block on banking and password windows, usage governor |
 | 2b · Voice notes | Built (optional): whisper.cpp client with an "I heard" echo |
 | 3 · Browser and apps | Works through connected MCPs (Chrome MCP tools are tiered by action). No extra code yet |

@@ -9,11 +9,13 @@ import { parse as parseDotenv } from 'dotenv';
 import { appRoot } from '../config/env.js';
 import { MetaClient } from '../meta/client.js';
 import { silentLogger } from '../observability/logger.js';
-import { readSecrets, SECRET_NAMES, writeSecret, type SecretName } from '../security/secrets.js';
+import { installAutostart, TUNNEL_NAME } from '../platform/autostart.js';
+import { readSecrets, SECRET_NAMES, secretStoreName, writeSecret, type SecretName } from '../security/secrets.js';
 import { ask, askHidden, confirm } from '../shared/prompt.js';
 
 /**
- * One-shot setup wizard. Run it at the shop PC (normal, non-elevated PowerShell):
+ * One-shot setup wizard for Windows, macOS and Linux. Run it at the shop PC as the normal user
+ * (not admin or root):
  *   npm run setup                    every step
  *   npm run setup -- --only meta     just some steps (comma separated)
  *   npm run setup -- --skip watcher  everything except some steps
@@ -42,7 +44,9 @@ const STEPS = [
 ] as const;
 type Step = (typeof STEPS)[number];
 const GRAPH = 'https://graph.facebook.com/v24.0';
-const TUNNEL = 'wa-operator';
+const TUNNEL = TUNNEL_NAME;
+const WIN = process.platform === 'win32';
+const MAC = process.platform === 'darwin';
 
 // ---- helpers ----------------------------------------------------------------------------------------
 
@@ -80,11 +84,12 @@ function run(cmd: string, args: string[], opts: { input?: string; quiet?: boolea
   return { ok: r.status === 0, out: `${r.stdout ?? ''}${r.stderr ?? ''}` };
 }
 
-function ps(script: string) {
-  return run('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', '-'], { input: script });
+/** Full path of a program on PATH, or ''. */
+function which(cmd: string): string {
+  const r = run(WIN ? 'where' : 'which', [cmd], { quiet: true });
+  return r.ok ? (r.out.split(/\r?\n/)[0]?.trim() ?? '') : '';
 }
-
-const has = (cmd: string) => run('where', [cmd], { quiet: true }).ok;
+const has = (cmd: string) => which(cmd) !== '';
 
 const secrets: Record<string, string> = {};
 async function secret(name: SecretName, prompt: string, gen?: () => string): Promise<string> {
@@ -93,7 +98,7 @@ async function secret(name: SecretName, prompt: string, gen?: () => string): Pro
   if (!v) throw new Error(`${name} is required`);
   writeSecret(name, v);
   secrets[name] = v;
-  log.ok(`${name} saved to Credential Manager`);
+  log.ok(`${name} saved to ${secretStoreName()}`);
   return v;
 }
 
@@ -330,21 +335,30 @@ const steps: Record<Step, () => Promise<void>> = {
         ? 'named'
         : 'quick';
     if (!has('cloudflared')) {
-      console.log('  Installing cloudflared with winget…');
-      run('winget', [
-        'install',
-        '--id',
-        'Cloudflare.cloudflared',
-        '-e',
-        '--accept-source-agreements',
-        '--accept-package-agreements',
-      ]);
+      if (WIN) {
+        console.log('  Installing cloudflared with winget…');
+        run('winget', [
+          'install',
+          '--id',
+          'Cloudflare.cloudflared',
+          '-e',
+          '--accept-source-agreements',
+          '--accept-package-agreements',
+        ]);
+      } else if (MAC && has('brew')) {
+        console.log('  Installing cloudflared with Homebrew…');
+        run('brew', ['install', 'cloudflared']);
+      } else {
+        throw new Error(
+          'cloudflared is not installed. Install it (https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/), then re-run: npm run setup -- --only tunnel',
+        );
+      }
       if (!has('cloudflared'))
         throw new Error(
           'cloudflared not found after install. Open a new terminal and re-run: npm run setup -- --only tunnel',
         );
     }
-    const bin = run('where', ['cloudflared'], { quiet: true }).out.split(/\r?\n/)[0]?.trim() ?? '';
+    const bin = which('cloudflared');
     if (mode === 'quick') {
       setEnv({ TUNNEL_MODE: 'quick', CLOUDFLARED_BIN: bin });
       log.ok('quick tunnel: the service starts it and registers the webhook on every start');
@@ -394,30 +408,11 @@ const steps: Record<Step, () => Promise<void>> = {
   },
 
   async autostart() {
-    log.step('Start at logon, keep awake, lock screen at logon');
-    const user = `${process.env.USERDOMAIN}\\${process.env.USERNAME}`;
-    const node = process.execPath;
-    const cf =
-      readEnv().TUNNEL_MODE === 'named'
-        ? run('where', ['cloudflared'], { quiet: true }).out.split(/\r?\n/)[0]?.trim()
-        : '';
-    const task = (name: string, exe: string, args: string, restart = true) => `
-$a = New-ScheduledTaskAction -Execute '${exe}' -Argument '${args.replace(/'/g, "''")}' -WorkingDirectory '${ROOT}'
-$t = New-ScheduledTaskTrigger -AtLogOn -User '${user}'
-$s = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable ${restart ? '-RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1)' : ''} -ExecutionTimeLimit (New-TimeSpan -Days 0) -MultipleInstances IgnoreNew
-$p = New-ScheduledTaskPrincipal -UserId '${user}' -LogonType Interactive -RunLevel Limited
-Register-ScheduledTask -TaskName '${name}' -Action $a -Trigger $t -Settings $s -Principal $p -Force | Out-Null`;
-    let script = task('WhatsApp Operator Mode', node, `"${path.join(ROOT, 'dist', 'bin', 'service.js')}"`);
-    if (cf) script += task('WhatsApp Operator Tunnel', cf, `tunnel run ${TUNNEL}`);
-    script += task('WhatsApp Operator Lock', 'rundll32.exe', 'user32.dll,LockWorkStation', false);
-    script += `
-powercfg /change standby-timeout-ac 0
-powercfg /change hibernate-timeout-ac 0
-Start-ScheduledTask -TaskName 'WhatsApp Operator Mode'
-${cf ? "Start-ScheduledTask -TaskName 'WhatsApp Operator Tunnel'" : ''}`;
-    const r = ps(script);
-    if (!r.ok) throw new Error(r.out);
-    log.ok('scheduled tasks registered and started; sleep off on mains power');
+    log.step(WIN ? 'Start at logon, keep awake, lock screen at logon' : 'Start automatically, keep awake');
+    const tunnelBin = readEnv().TUNNEL_MODE === 'named' ? which('cloudflared') : '';
+    const notes = installAutostart({ root: ROOT, ...(tunnelBin ? { tunnelBin } : {}) });
+    log.ok('registered and started');
+    for (const n of notes) log.ok(n);
     const port = readEnv().WEBHOOK_PORT ?? '3100';
     if (await waitFor(`http://127.0.0.1:${port}/health/live`, 30)) log.ok('service is up');
     else log.warn(`service did not answer yet; check ${path.join(ROOT, 'logs')}`);
@@ -459,6 +454,15 @@ ${cf ? "Start-ScheduledTask -TaskName 'WhatsApp Operator Tunnel'" : ''}`;
   },
 
   async autologon() {
+    if (!WIN) {
+      log.step('Automatic login after a reboot');
+      console.log(
+        MAC
+          ? '  By hand: System Settings → Users & Groups → Automatically log in as (needs FileVault off).'
+          : '  Not needed: the service starts at boot without a login (systemd linger).',
+      );
+      return;
+    }
     log.step('Autologon (so a Windows Update reboot does not stop at the login screen)');
     if (!(await confirm('Set up Autologon now? (stores your Windows password encrypted, via Sysinternals)', true)))
       return;
@@ -518,9 +522,12 @@ ${cf ? "Start-ScheduledTask -TaskName 'WhatsApp Operator Tunnel'" : ''}`;
 };
 
 async function main(): Promise<void> {
-  if (process.platform !== 'win32') throw new Error('The setup wizard is for the Windows shop PC.');
-  if (spawnSync('net', ['session'], { stdio: 'ignore' }).status === 0)
-    console.log('\x1b[33mRunning as admin. Scheduled tasks will still run without admin rights.\x1b[0m');
+  if (WIN ? spawnSync('net', ['session'], { stdio: 'ignore' }).status === 0 : process.getuid?.() === 0)
+    console.log(
+      WIN
+        ? '\x1b[33mRunning as admin. Scheduled tasks will still run without admin rights.\x1b[0m'
+        : '\x1b[33mRunning as root. Run setup as the normal user instead (no sudo).\x1b[0m',
+    );
   const arg = (name: string) => {
     const i = process.argv.indexOf(name);
     return i > 0 ? (process.argv[i + 1] ?? '').split(',').filter(Boolean) : [];
@@ -543,7 +550,11 @@ async function main(): Promise<void> {
   console.log('\n────────────────────────────');
   if (failed.length) console.log(`Re-run the failed steps: npm run setup -- --only ${failed.join(',')}`);
   else console.log("Done. Message the operator number from the owner's phone; it will ask for the PIN.");
-  console.log('By hand (once): BIOS → "Restore on AC power loss" = Power On.');
+  console.log(
+    MAC
+      ? 'By hand (once): System Settings → Energy → "Start up automatically after a power failure".'
+      : 'By hand (once): BIOS → "Restore on AC power loss" = Power On.',
+  );
   console.log('After the first message, review MCP tools: npm run cli -- tiers, then tiers accept.');
 }
 

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { secretsFile } from '../security/secrets.js';
 
 /**
  * Real-path checks. Every path is resolved before any folder decision: `..`, `~`, %VAR% / $env:VAR,
@@ -109,6 +110,26 @@ export function defaultDenyPaths(appDir: string, dataDir: string, extra: string[
     path.join(roaming, 'Microsoft', 'Crypto'),
     path.join(roaming, 'Claude'),
     path.join(local, 'wa-operator'),
+    // macOS
+    path.join(home, 'Library', 'Keychains'),
+    path.join(home, 'Library', 'Cookies'),
+    path.join(home, 'Library', 'Safari'),
+    path.join(home, 'Library', 'Application Support', 'Google', 'Chrome'),
+    path.join(home, 'Library', 'Application Support', 'Microsoft Edge'),
+    path.join(home, 'Library', 'Application Support', 'BraveSoftware'),
+    path.join(home, 'Library', 'Application Support', 'Firefox', 'Profiles'),
+    path.join(home, 'Library', 'Application Support', 'com.operasoftware.Opera'),
+    path.join(home, 'Library', 'Application Support', 'Claude'),
+    // Linux
+    path.join(home, '.config', 'google-chrome'),
+    path.join(home, '.config', 'chromium'),
+    path.join(home, '.config', 'microsoft-edge'),
+    path.join(home, '.config', 'BraveSoftware'),
+    path.join(home, '.config', 'opera'),
+    path.join(home, '.mozilla'),
+    path.join(home, '.local', 'share', 'keyrings'),
+    path.join(home, '.config', 'Claude'),
+    path.dirname(secretsFile()),
     ...extra,
   ];
   return [...new Set(list.map((p) => realPath(p, home)))];

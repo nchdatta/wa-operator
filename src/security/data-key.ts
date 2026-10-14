@@ -3,7 +3,7 @@ import { readSecrets, secretStoreAvailable, writeSecret } from './secrets.js';
 
 /**
  * The key that encrypts everything Operator Mode stores (database, WhatsApp link session).
- * Made on first use and kept in Windows Credential Manager, never on disk next to the data.
+ * Made on first use and kept in the system secret store (Credential Manager, Keychain, keyring), never next to the data.
  * Losing it (e.g. a Windows reinstall) makes the old data unreadable: the app then starts fresh.
  */
 
@@ -14,7 +14,7 @@ export function ensureDataKey(existing?: string): string {
   const stored = readSecrets(['OPERATOR_DATA_KEY']).OPERATOR_DATA_KEY;
   if (stored && HEX_KEY.test(stored)) return stored;
   if (!secretStoreAvailable())
-    throw new Error('No OPERATOR_DATA_KEY: set it (64 hex characters) in the environment on this platform.');
+    throw new Error('No OPERATOR_DATA_KEY: secret store is off, so set it (64 hex characters) as an environment variable.');
   const key = crypto.randomBytes(32).toString('hex');
   writeSecret('OPERATOR_DATA_KEY', key);
   return key;

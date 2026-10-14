@@ -2,7 +2,7 @@
 
 ## Fast path: the wizard
 
-Double-click **install.cmd**. If Node 24 or cloudflared is missing, it installs them with winget. Then it runs `npm install` and starts the wizard. It does the same as:
+Windows: double-click **install.cmd**. If Node 24 or cloudflared is missing, it installs them with winget. macOS and Linux: run **./install.sh** (see [macOS and Linux](#macos-and-linux)). Then it runs `npm install` and starts the wizard. It does the same as:
 
 ```powershell
 cd operator-mode
@@ -42,7 +42,7 @@ claude setup-token                                   # log in, copy the long-liv
 npm run cli -- secret set CLAUDE_CODE_OAUTH_TOKEN    # paste it (hidden)
 ```
 
-All secrets are kept in Windows Credential Manager under `wa-operator:*`, never in `.env`. Claude's own tools are blocked from reading them.
+All secrets are kept in the system secret store (Windows Credential Manager, macOS Keychain or the Linux keyring) under `wa-operator:*`, never in `.env`. Claude's own tools are blocked from reading them.
 
 ## 3. A dedicated WhatsApp number
 
@@ -138,13 +138,28 @@ npx wrangler secret put WHATSAPP_ACCESS_TOKEN
 npx wrangler deploy
 ```
 
+## macOS and Linux
+
+Same app, same commands. What differs:
+
+| | Windows | macOS | Linux |
+|---|---|---|---|
+| Install | `install.cmd` | `./install.sh` (cloudflared via Homebrew) | `./install.sh` (install Node 24 and cloudflared first) |
+| Secrets | Credential Manager | Keychain | keyring (`secret-tool`); on a server with no keyring, `~/.config/wa-operator/secrets.json`, readable only by you |
+| Autostart | Task Scheduler, at logon | launchd agent, at logon | systemd user service, at boot (linger) |
+| Keep awake | power plan | `caffeinate` while the service runs | by hand: `sudo systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target` |
+| Login after reboot | Autologon step | System Settings → Users & Groups → Automatically log in | not needed |
+| Screenshots | built in | allow Screen Recording and Accessibility for the terminal / node | needs `xdotool` plus `gnome-screenshot`, `scrot` or ImageMagick (X11) |
+
+Run setup as your normal user, never with sudo. On a Linux server without a keyring, the secrets file is **not encrypted**: only file permissions protect it (like SSH keys). Install `gnome-keyring` (or another Secret Service keyring) for encrypted storage.
+
 ## Data encryption
 
 Everything Operator Mode stores is encrypted at rest:
 - `data/operator.db` (history, approvals, exact actions, queued messages): SQLCipher, AES-256.
 - `data/baileys-auth/` (WhatsApp link session): AES-256-GCM per file.
 
-The key (`OPERATOR_DATA_KEY`) is made on first start and kept in Windows Credential Manager, never next to the data. Older unencrypted files are encrypted automatically on first start. If the key is lost (Windows reinstall, `secret delete`), the old data cannot be read: delete `data/` and set the PIN again. `npm run uninstall` keeps the key unless `--purge` also deletes the data.
+The key (`OPERATOR_DATA_KEY`) is made on first start and kept in the system secret store, never next to the data. Older unencrypted files are encrypted automatically on first start. If the key is lost (Windows reinstall, `secret delete`), the old data cannot be read: delete `data/` and set the PIN again. `npm run uninstall` keeps the key unless `--purge` also deletes the data.
 
 ## Baileys: WhatsApp without Meta
 
@@ -204,7 +219,8 @@ Not undone, change these by hand if needed:
 
 | Command | What it does |
 |---|---|
-| `npm start` / `npm stop` | Start / stop the background service |
+| `npm run status` | Whether autostart is on and the service answers |
+| `npm start` / `npm stop` | Start / stop everything (service, tunnel, lock-at-logon). `npm stop` also turns off autostart, so nothing comes back after a reboot until `npm start` |
 | `npm run restart` | Rebuild and restart (after changing code, `.env` or `config/mcp.json`) |
 | `npm run logs` | Follow the log |
 | `npm run doctor` | Check login, service, tunnel, webhook, MCP servers, PIN |
@@ -212,4 +228,4 @@ Not undone, change these by hand if needed:
 | `npm run dev` | Run in this window (stops when it closes) |
 | `npm run check` | Typecheck, lint and test |
 
-Install / remove: `install.cmd` / `uninstall.cmd` (or `npm run setup` / `npm run uninstall`).
+Install / remove: `install.cmd` / `uninstall.cmd` on Windows, `./install.sh` / `npm run uninstall` on macOS and Linux (or `npm run setup` / `npm run uninstall`).

@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -18,7 +17,16 @@ import { isTier, TIERS } from '../operator/tier.js';
 import { openDb } from '../persistence/db.js';
 import { toolTiers } from '../persistence/schema.js';
 import { ensureDataKey } from '../security/data-key.js';
-import { deleteSecret, readSecrets, SECRET_NAMES, writeSecret, type SecretName } from '../security/secrets.js';
+import { autostartStatus } from '../platform/autostart.js';
+import {
+  deleteSecret,
+  readSecrets,
+  SECRET_NAMES,
+  secretStoreAvailable,
+  secretStoreName,
+  writeSecret,
+  type SecretName,
+} from '../security/secrets.js';
 import { systemClock } from '../shared/clock.js';
 
 /**
@@ -217,7 +225,9 @@ program
     }
   });
 
-const secret = program.command('secret').description('Secrets in Windows Credential Manager.');
+const secret = program
+  .command('secret')
+  .description('Secrets in the system secret store (Credential Manager, Keychain or keyring).');
 secret
   .command('set <name>')
   .description(`Store a secret (${SECRET_NAMES.join(', ')}). The value is read hidden from the terminal or stdin.`)
@@ -227,7 +237,7 @@ secret
     const value = await readHidden(`${name}: `);
     if (value.length < 8) throw new Error('That value looks too short.');
     writeSecret(name as SecretName, value);
-    console.log(`${name} saved to Credential Manager.`);
+    console.log(`${name} saved to ${secretStoreName()}.`);
   });
 secret
   .command('list')
@@ -344,16 +354,12 @@ program
       const res = await fetch(`http://127.0.0.1:${c.WEBHOOK_PORT}/health/ready`, { signal: AbortSignal.timeout(3000) });
       line(res.ok, `service ${res.ok ? 'running' : `not ready (HTTP ${res.status})`} on port ${c.WEBHOOK_PORT}`);
     }).catch(() => undefined);
-    if (process.platform === 'win32') {
-      const tasks = ['WhatsApp Operator Mode', ...(c.TUNNEL_MODE === 'named' ? ['WhatsApp Operator Tunnel'] : [])];
-      for (const t of tasks) {
-        const r = spawnSync('schtasks', ['/query', '/tn', t], { encoding: 'utf8' });
-        line(
-          r.status === 0 ? true : 'warn',
-          `logon task "${t}" ${r.status === 0 ? 'registered' : 'missing (npm run setup -- --only autostart)'}`,
-        );
-      }
-    }
+    for (const u of autostartStatus(c.TUNNEL_MODE === 'named'))
+      line(
+        u.enabled ? true : 'warn',
+        `autostart (${u.label}): ${!u.installed ? 'missing (npm run setup -- --only autostart)' : u.enabled ? 'on' : 'off (npm start)'}`,
+      );
+    line(secretStoreAvailable() ? true : 'warn', `secrets kept in ${secretStoreName()}`);
     line(
       c.TUNNEL_MODE === 'named' ? true : 'warn',
       c.TUNNEL_MODE === 'named'

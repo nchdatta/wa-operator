@@ -38,7 +38,62 @@ $g.Dispose(); $bmp.Dispose()
 [Console]::Out.Write("OK:" + $title)
 `;
 
-export function captureScreen(file: string): Promise<{ ok: true; title: string } | { ok: false; reason: string }> {
+type Shot = { ok: true; title: string } | { ok: false; reason: string };
+
+function exec(cmd: string, args: string[]): Promise<{ code: number | null; out: string; err: string }> {
+  return new Promise((resolve) => {
+    const p = spawn(cmd, args, { windowsHide: true });
+    let out = '';
+    let err = '';
+    p.stdout.on('data', (d: Buffer) => (out += d.toString('utf8')));
+    p.stderr.on('data', (d: Buffer) => (err += d.toString('utf8')));
+    p.on('error', (e) => resolve({ code: -1, out, err: e.message }));
+    p.on('close', (code) => resolve({ code, out: out.trim(), err: err.trim() }));
+  });
+}
+
+/**
+ * macOS and Linux. The front window's title is checked first; when it cannot be read there is no
+ * screenshot, so a banking or password window is never sent by accident.
+ */
+async function captureUnix(file: string): Promise<Shot> {
+  const mac = process.platform === 'darwin';
+  const t = mac
+    ? await exec('osascript', [
+        '-e',
+        'tell application "System Events" to tell (first process whose frontmost is true) to return (name as text) & " - " & (name of front window as text)',
+      ])
+    : await exec('xdotool', ['getactivewindow', 'getwindowname']);
+  if (t.code !== 0)
+    return {
+      ok: false,
+      reason: mac
+        ? 'cannot read the front window title (allow Terminal/node under System Settings → Privacy & Security → Accessibility)'
+        : 'cannot read the front window title (install xdotool; Wayland-only desktops are not supported)',
+    };
+  if (SENSITIVE_WINDOW.test(t.out))
+    return { ok: false, reason: 'a banking or password window is in front, so no screenshot was taken' };
+  const tries: [string, string[]][] = mac
+    ? [['screencapture', ['-x', file]]]
+    : [
+        ['gnome-screenshot', ['-f', file]],
+        ['scrot', ['-o', file]],
+        ['import', ['-window', 'root', file]],
+      ];
+  for (const [cmd, args] of tries) {
+    const r = await exec(cmd, args);
+    if (r.code === 0 && fs.existsSync(file)) return { ok: true, title: t.out };
+  }
+  return {
+    ok: false,
+    reason: mac
+      ? 'screen capture failed (allow Screen Recording under System Settings → Privacy & Security)'
+      : 'screen capture failed (install gnome-screenshot, scrot or imagemagick)',
+  };
+}
+
+export function captureScreen(file: string): Promise<Shot> {
+  if (process.platform !== 'win32') return captureUnix(file);
   return new Promise((resolve) => {
     const p = spawn(
       'powershell.exe',

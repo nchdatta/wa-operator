@@ -126,7 +126,7 @@ export class TunnelManager {
   private spawnQuick(): void {
     const bin = findCloudflared(this.ctx.config.CLOUDFLARED_BIN);
     if (!bin) {
-      this.ctx.logger.error('cloudflared not found (winget install Cloudflare.cloudflared, or set CLOUDFLARED_BIN)');
+      this.ctx.logger.error('cloudflared not found (install it: winget install Cloudflare.cloudflared, brew install cloudflared, or the Linux package; or set CLOUDFLARED_BIN)');
       return;
     }
     const target = `http://127.0.0.1:${this.ctx.config.WEBHOOK_PORT}`;

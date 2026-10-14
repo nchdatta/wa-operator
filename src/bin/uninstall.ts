@@ -4,7 +4,7 @@
  *   npm run uninstall                 stop the service, remove tasks, webhook override and secrets (keeps .env and data)
  *   npm run uninstall -- --purge      also delete data/, logs/ and dist/ (.env is never deleted) (uninstall.cmd also removes node_modules)
  *   npm run uninstall -- --yes        no questions
- *   npm run uninstall -- --keep-secrets   leave the Credential Manager entries (for a reinstall)
+ *   npm run uninstall -- --keep-secrets   leave the stored secrets (for a reinstall)
  */
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -13,7 +13,8 @@ import { parse as parseDotenv } from 'dotenv';
 import { appRoot } from '../config/env.js';
 import { MetaClient } from '../meta/client.js';
 import { silentLogger } from '../observability/logger.js';
-import { deleteSecret, readSecrets, SECRET_NAMES } from '../security/secrets.js';
+import { removeAutostart } from '../platform/autostart.js';
+import { deleteSecret, readSecrets, SECRET_NAMES, secretStoreName } from '../security/secrets.js';
 import { confirm } from '../shared/prompt.js';
 import { purgePaths } from '../shared/purge.js';
 
@@ -21,7 +22,6 @@ process.noDeprecation = true;
 
 const ROOT = appRoot();
 const ENV_PATH = path.join(ROOT, '.env');
-const TASKS = ['WhatsApp Operator Mode', 'WhatsApp Operator Tunnel', 'WhatsApp Operator Lock'];
 const TUNNEL = 'wa-operator';
 const args = process.argv.slice(2);
 const yes = args.includes('--yes') || args.includes('-y');
@@ -35,35 +35,18 @@ const log = {
 };
 const ask = (q: string, def = true) => (yes ? Promise.resolve(def) : confirm(q, def));
 
-function ps(script: string) {
-  const r = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', '-'], {
-    input: script,
-    encoding: 'utf8',
-  });
-  return { ok: r.status === 0, out: `${r.stdout ?? ''}${r.stderr ?? ''}`.trim() };
-}
-
-function stopService(): void {
-  log.step('Stop the service and remove scheduled tasks');
-  for (const t of TASKS) {
-    const r = ps(`$t = Get-ScheduledTask -TaskName '${t}' -ErrorAction SilentlyContinue
-if ($t) { Stop-ScheduledTask -TaskName '${t}' -ErrorAction SilentlyContinue; Unregister-ScheduledTask -TaskName '${t}' -Confirm:$false; 'removed' }`);
-    if (r.out.includes('removed')) log.ok(`task "${t}" removed`);
-  }
-  // A manual `npm run dev` or the quick tunnel child may still run from this folder.
-  const dir = ROOT.replace(/'/g, "''");
-  const r = ps(`Get-CimInstance Win32_Process | Where-Object {
-  ($_.Name -eq 'node.exe' -and $_.CommandLine -like '*${dir}*service*' -and $_.ProcessId -ne ${process.pid}) -or
-  ($_.Name -eq 'cloudflared.exe' -and $_.CommandLine -like '*--url http://127.0.0.1*')
-} | ForEach-Object { Stop-Process -Id $_.ProcessId -Force; $_.Name }`);
-  if (r.out) log.ok(`stopped: ${r.out.split(/\r?\n/).join(', ')}`);
+function stopService(env: Record<string, string>): void {
+  log.step('Stop the service and remove autostart');
+  const r = removeAutostart(ROOT, Number(env.WEBHOOK_PORT ?? 3100));
+  for (const u of r.units) log.ok(`"${u}" removed`);
+  if (r.killed) log.ok(`ended ${r.killed} leftover program(s)`);
 }
 
 async function removeWebhook(env: Record<string, string>, s: Record<string, string>): Promise<void> {
   if (env.CHANNEL === 'telegram' || !env.WHATSAPP_BUSINESS_ACCOUNT_ID) return;
   log.step('Remove the webhook override (the app stays subscribed, so other projects keep working)');
   if (!s.WHATSAPP_ACCESS_TOKEN || !s.META_APP_SECRET) {
-    log.warn('no Meta credentials in Credential Manager; skipped');
+    log.warn(`no Meta credentials in ${secretStoreName()}; skipped`);
     return;
   }
   const client = new MetaClient({
@@ -93,7 +76,7 @@ async function removeTunnel(env: Record<string, string>): Promise<void> {
 }
 
 function removeSecrets(): void {
-  log.step('Remove secrets from Windows Credential Manager');
+  log.step(`Remove secrets from ${secretStoreName()}`);
   let n = 0;
   for (const name of SECRET_NAMES) {
     // The data key goes only with the data: without it the kept database could never be read again.
@@ -129,17 +112,23 @@ async function main(): Promise<void> {
   const env = fs.existsSync(ENV_PATH) ? parseDotenv(fs.readFileSync(ENV_PATH)) : {};
   const secrets = readSecrets(SECRET_NAMES);
 
-  stopService();
+  stopService(env);
   await removeWebhook(env, secrets);
   await removeTunnel(env);
   if (!keepSecrets && (await ask('Delete the saved Meta/Claude secrets?', true))) removeSecrets();
   if (purge) purgeFiles();
 
   console.log('\nDone. Not changed (undo by hand if you want):');
-  console.log('  - Sleep settings: powercfg /change standby-timeout-ac 30');
-  console.log('  - Autologon: run Autologon64.exe from Sysinternals and click Disable');
+  if (process.platform === 'win32') {
+    console.log('  - Sleep settings: powercfg /change standby-timeout-ac 30');
+    console.log('  - Autologon: run Autologon64.exe from Sysinternals and click Disable');
+  } else if (process.platform === 'linux') {
+    console.log('  - Start at boot without login: sudo loginctl disable-linger $USER');
+  }
   console.log('  - Meta: the PIN Flow and the reply template stay in WhatsApp Manager');
-  console.log(`  - .env kept${purge ? '' : ' with data/'}. Reinstall with: install.cmd`);
+  console.log(
+    `  - .env kept${purge ? '' : ' with data/'}. Reinstall with: ${process.platform === 'win32' ? 'install.cmd' : './install.sh'}`,
+  );
 }
 
 main().catch((e: unknown) => {
