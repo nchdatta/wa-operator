@@ -315,6 +315,8 @@ export class OperatorSession {
     const env: Record<string, string | undefined> = { ...process.env };
     for (const k of [...SECRET_NAMES, 'OPERATOR_PIN_HASH']) delete env[k];
     env.CLAUDE_AGENT_SDK_CLIENT_APP = 'wa-operator/0.1.0';
+    // Right after boot, npx-based MCP servers can take longer than Claude Code's 30 s default.
+    env.MCP_TIMEOUT ??= '60000';
     if (c.CLAUDE_CODE_OAUTH_TOKEN) env.CLAUDE_CODE_OAUTH_TOKEN = c.CLAUDE_CODE_OAUTH_TOKEN;
 
     const gateHook: HookCallback = (input, toolUseID, { signal }) => this.gateHook(input, toolUseID, signal);
