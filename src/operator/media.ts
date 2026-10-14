@@ -36,6 +36,17 @@ export async function saveToInbox(
   return file;
 }
 
+/**
+ * whisper on "auto" sometimes guesses the wrong language and returns a mix of scripts (Korean, Kannada…).
+ * The owner speaks Bangla or English, so letters from any other script mean the note was not understood.
+ */
+export function looksGarbled(text: string): boolean {
+  const letters = text.match(/\p{L}/gu) ?? [];
+  if (letters.length < 2) return true;
+  const foreign = letters.filter((c) => !/[A-Za-zÀ-ɏঀ-৿]/.test(c)).length;
+  return foreign > 0;
+}
+
 /** POST the audio to whisper.cpp's /inference endpoint (start the server with --convert for OGG/Opus). */
 export async function transcribe(
   whisperUrl: string,

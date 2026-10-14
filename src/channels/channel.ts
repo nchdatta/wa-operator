@@ -68,4 +68,6 @@ export interface Channel {
   deleteMessage?(messageId: string): Promise<void>;
   /** Text-reply PIN mode: if this message answers an open PIN prompt, return its token (and consume it). */
   takeTextPin?(text: string, replyToId?: string): string | null;
+  /** Text-reply PIN mode: remove the answered prompt and as much of the PIN reply as the channel allows. */
+  wipePin?(pinMessageId: string): Promise<void>;
 }

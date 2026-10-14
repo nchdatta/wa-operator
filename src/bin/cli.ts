@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -430,7 +431,8 @@ program
   )
   .option('--pair <number>', 'link by 8-character code instead of QR (the bot number, digits only)')
   .option('--reset', 'forget the current link first')
-  .action(async (o: { pair?: string; reset?: boolean }) => {
+  .option('--terminal', 'draw the QR code in the terminal instead of a small browser window')
+  .action(async (o: { pair?: string; reset?: boolean; terminal?: boolean }) => {
     const config = loadConfig();
     const dir = baileysAuthDir(config);
     if (o.reset) fs.rmSync(dir, { recursive: true, force: true });
@@ -442,21 +444,51 @@ program
     const ch = new BaileysChannel(config, silentLogger);
     const pairPhone = o.pair?.replace(/\D/g, '');
     console.log('On the Operator phone: WhatsApp → Settings → Linked devices → Link a device.');
+    // The terminal QR fills the window; by default show a ~200 px image in a page that refreshes itself
+    // as WhatsApp rotates the code. --terminal (or no browser) falls back to the terminal.
+    const page = path.join(config.dataDir, 'link-qr.html');
+    let opened = false;
+    const showTerminal = (qr: string) =>
+      // Low error correction and a 1-module border: the smallest code a phone still scans.
+      QRCode.toString(qr, { type: 'terminal', small: true, errorCorrectionLevel: 'L', margin: 1 }).then((s) =>
+        console.log(s),
+      );
+    const showPage = async (qr: string) => {
+      const img = await QRCode.toDataURL(qr, { errorCorrectionLevel: 'L', margin: 2, scale: 4 });
+      fs.mkdirSync(path.dirname(page), { recursive: true });
+      fs.writeFileSync(page, qrPage(img), { mode: 0o600 });
+      if (opened) return;
+      const r = WIN
+        ? spawnSync('cmd', ['/c', 'start', '', page], { windowsHide: true })
+        : spawnSync(process.platform === 'darwin' ? 'open' : 'xdg-open', [page]);
+      opened = r.status === 0;
+      if (opened) console.log(`QR code opened in your browser (${page}). It refreshes by itself.`);
+      else await showTerminal(qr);
+    };
     await ch.connect({
       ...(pairPhone ? { pairPhone } : {}),
-      // Low error correction and a 1-module border: the smallest code a phone still scans.
-      onQr: (qr) =>
-        void QRCode.toString(qr, { type: 'terminal', small: true, errorCorrectionLevel: 'L', margin: 1 }).then((s) =>
-          console.log(s),
-        ),
+      onQr: (qr) => void (o.terminal ? showTerminal(qr) : showPage(qr)),
       onPairingCode: (code) => console.log(`Pairing code: ${code}  (tap "Link with phone number instead")`),
     });
+    if (fs.existsSync(page)) fs.writeFileSync(page, qrPage(null));
     // Let the first creds sync finish before closing.
     await new Promise((r) => setTimeout(r, 5000));
     ch.stop();
     console.log(`✔ Linked. Session saved in ${dir} (keep it private). Start the service: npm start`);
     process.exit(0);
   });
+
+const WIN = process.platform === 'win32';
+
+/** Small self-refreshing page with the link QR code (or "Linked" once done). */
+function qrPage(img: string | null): string {
+  const body = img
+    ? `<img src="${img}" width="200" height="200" alt="WhatsApp link QR code"><p>WhatsApp → Linked devices → Link a device</p>`
+    : '<p style="font-size:20px">✔ Linked. You can close this page.</p>';
+  return `<!doctype html><meta charset="utf-8"><title>Link WhatsApp</title>${img ? '<meta http-equiv="refresh" content="4">' : ''}
+<style>body{margin:0;min-height:100vh;display:grid;place-content:center;justify-items:center;font:14px system-ui,sans-serif;background:#fff;color:#111}img{image-rendering:pixelated}</style>
+${body}`;
+}
 
 program.parseAsync().catch((e: unknown) => {
   console.error(`Error: ${e instanceof Error ? e.message : String(e)}`);

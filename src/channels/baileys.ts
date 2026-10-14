@@ -28,7 +28,7 @@ import { mimeFor } from './mime.js';
  * no tunnel, no 24-hour window. Unofficial: it can get the number banned, so use a spare number.
  *
  * Differences from the Cloud API channel: buttons and lists are numbered text (the owner replies
- * with the number), and the PIN is a text reply (WhatsApp cannot delete the owner's message for them).
+ * with the number), and the PIN is a text reply; the bot deletes its prompt and its own copy of the reply.
  */
 
 const MENU_TTL = 10 * MINUTE;
@@ -97,6 +97,8 @@ export class BaileysChannel implements Channel {
   /** Last numbered menu: option number → button/row ID. */
   private menu: { ids: string[]; at: number; messageId: string | null } | null = null;
   private readonly pinPrompts = new Map<string, { token: string; at: number }>();
+  /** PIN prompts already answered, deleted by wipePin. */
+  private readonly usedPrompts: string[] = [];
   /** Set when connected; receives every new message from the owner chat. */
   onMessage: ((m: WAMessage) => void) | null = null;
 
@@ -242,9 +244,7 @@ export class BaileysChannel implements Channel {
   }
 
   async requestPin(token: string, prompt: string): Promise<void> {
-    const id = await this.sendText(
-      `${prompt}\n\nReply to this message with your PIN, then delete your PIN message ("Delete for everyone").`,
-    );
+    const id = await this.sendText(`${prompt}\n\nReply with your PIN.`);
     if (id) this.pinPrompts.set(id, { token, at: Date.now() });
   }
 
@@ -254,8 +254,45 @@ export class BaileysChannel implements Channel {
     const replied = replyToId ? this.pinPrompts.get(replyToId) : undefined;
     const open = replied ?? (/^\s*\d{4,12}\s*$/.test(text) ? [...this.pinPrompts.values()].at(-1) : undefined);
     if (!open) return null;
-    for (const [id, p] of this.pinPrompts) if (p.token === open.token) this.pinPrompts.delete(id);
+    for (const [id, p] of this.pinPrompts)
+      if (p.token === open.token) {
+        this.pinPrompts.delete(id);
+        this.usedPrompts.push(id);
+      }
     return open.token;
+  }
+
+  /**
+   * Clean up after a PIN reply: delete our PIN prompt for everyone and drop the owner's PIN message from
+   * this linked device. WhatsApp only lets the sender delete a message for everyone, so on the owner's
+   * own phone it can only go if the chat is their own number (self-chat) or disappearing messages are on.
+   */
+  async wipePin(pinMessageId: string): Promise<void> {
+    const sock = await this.socket();
+    for (const id of this.usedPrompts.splice(0)) {
+      await this.deleteMessage(id).catch((e: unknown) =>
+        this.logger.debug({ err: String(e) }, 'baileys: could not delete PIN prompt'),
+      );
+    }
+    const pinMsg = this.cache.get(pinMessageId);
+    const key = this.keyFor(pinMessageId);
+    try {
+      if (key.fromMe) await sock.sendMessage(this.jid, { delete: key });
+      else
+        await sock.chatModify(
+          {
+            deleteForMe: {
+              deleteMedia: false,
+              key,
+              timestamp: Number(pinMsg?.messageTimestamp ?? Math.floor(Date.now() / 1000)),
+            },
+          },
+          this.jid,
+        );
+    } catch (e) {
+      this.logger.debug({ err: String(e) }, 'baileys: could not remove PIN message');
+    }
+    this.cache.delete(pinMessageId);
   }
 
   private keyFor(messageId: string): WAMessageKey {

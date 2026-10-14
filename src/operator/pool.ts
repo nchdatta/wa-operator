@@ -5,7 +5,7 @@ import type { Governor } from '../runtime/governor.js';
 import { truncate } from '../security/redact.js';
 import type { Gate } from './gate.js';
 import type { OwnerQuestions } from './output.js';
-import { OperatorSession, type RunHandle, type RunResult, type SessionInfo } from './session.js';
+import { OperatorSession, type BrowserLock, type RunHandle, type RunResult, type SessionInfo } from './session.js';
 
 /**
  * Parallel task slots. Slot 0 is the main conversation and takes every task when it is free; while it is
@@ -43,12 +43,15 @@ interface Finished {
 }
 
 const NOTES_KEPT = 3;
+const LINKS_KEPT = 200;
 
 export class SessionPool {
   private readonly finished: Finished[] = [];
   /** Sequence number of each slot's last task start. */
   private readonly lastStart: number[] = [];
   private seq = 0;
+  private readonly runSlot = new Map<string, number>();
+  private readonly messageSlot = new Map<string, number>();
 
   constructor(private readonly slots: Slot[]) {}
 
@@ -62,9 +65,25 @@ export class SessionPool {
   ): SessionPool {
     const slots: OperatorSession[] = [];
     const pool = new SessionPool(slots);
+    const browser: BrowserLock = { holder: null };
     for (let i = 0; i < ctx.config.OPERATOR_PARALLEL; i++)
-      slots.push(new OperatorSession(ctx, chat, gate, approvals, governor, questions, i, () => pool.runningCount() > 1));
+      slots.push(
+        new OperatorSession(ctx, chat, gate, approvals, governor, questions, i, () => pool.runningCount() > 1, browser),
+      );
     return pool;
+  }
+
+  /** Remember which slot a message belongs to (the task's request or its answer). */
+  link(messageId: string | null, runId: string): void {
+    const slot = this.runSlot.get(runId);
+    if (!messageId || slot === undefined) return;
+    this.messageSlot.set(messageId, slot);
+    if (this.messageSlot.size > LINKS_KEPT) this.messageSlot.delete(this.messageSlot.keys().next().value!);
+  }
+
+  /** The slot whose conversation a replied-to message came from, if known. */
+  slotFor(messageId: string): number | undefined {
+    return this.messageSlot.get(messageId);
   }
 
   get size(): number {
@@ -89,10 +108,17 @@ export class SessionPool {
     return this.slots.some((s) => s.busy && s.currentSource === messageId);
   }
 
-  /** Run on the main slot when free, else the next free one. The caller keeps within `size`. */
+  /**
+   * Run on the preferred slot (a follow-up keeps its conversation) or the main slot when free, else the
+   * next free one. The caller keeps within `size`.
+   */
   runTask(handle: RunHandle): Promise<RunResult> {
-    const i = this.slots.findIndex((s) => !s.busy);
+    const p = handle.preferSlot;
+    const i = p !== undefined && this.slots[p] && !this.slots[p].busy ? p : this.slots.findIndex((s) => !s.busy);
     if (i < 0) return Promise.reject(new Error('all task slots are busy'));
+    this.runSlot.set(handle.id, i);
+    if (this.runSlot.size > LINKS_KEPT) this.runSlot.delete(this.runSlot.keys().next().value!);
+    this.link(handle.sourceMessageId, handle.id);
     const since = this.lastStart[i] ?? 0;
     this.lastStart[i] = ++this.seq;
     const notes = this.finished.filter((f) => f.slot !== i && f.at > since).slice(-NOTES_KEPT);

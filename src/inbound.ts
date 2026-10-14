@@ -15,7 +15,7 @@ import type { OwnerMessage } from './channels/channel.js';
 import type { OwnerChat } from './channels/owner-chat.js';
 import type { AppContext } from './context.js';
 import type { Gate } from './operator/gate.js';
-import { saveToInbox, transcribe } from './operator/media.js';
+import { looksGarbled, saveToInbox, transcribe } from './operator/media.js';
 import type { OwnerQuestions } from './operator/output.js';
 import type { RunQueue } from './operator/runs.js';
 import type { SessionPool } from './operator/pool.js';
@@ -143,7 +143,12 @@ export class Inbound {
       const text = (m.text ?? '').trim();
       // 2. Commands.
       const textPinToken = text ? chat.channel.takeTextPin?.(text, m.replyToId) : null;
-      if (textPinToken) return await this.onPin(textPinToken, text);
+      if (textPinToken) {
+        void chat.channel
+          .wipePin?.(m.id)
+          .catch((e: unknown) => ctx.logger.debug({ err: errMsg(e) }, 'could not clean up the PIN message'));
+        return await this.onPin(textPinToken, text);
+      }
       if (text.startsWith('/')) return await this.onCommand(text);
 
       // 3. Instructions.
@@ -174,7 +179,9 @@ export class Inbound {
           return;
         }
       }
-      await this.d.runs.enqueue(prompt, m.id);
+      // A reply to a finished task's request or answer continues in that task's conversation.
+      const slot = m.replyToId ? this.d.session.slotFor(m.replyToId) : undefined;
+      await this.d.runs.enqueue(prompt, m.id, 'owner', slot);
       if (!gate.isUnlocked()) await this.requestUnlock();
     } catch (e) {
       ctx.logger.error({ err: errMsg(e) }, 'inbound: failed to handle owner message');
@@ -201,8 +208,8 @@ export class Inbound {
           return null;
         }
         const heard = await transcribe(ctx.config.WHISPER_URL, file, this.d.fetchImpl, ctx.config.WHISPER_LANG);
-        if (!heard) {
-          await chat.say("🎙️ I couldn't make out that voice note. Please type it or try again.");
+        if (!heard || looksGarbled(heard)) {
+          await chat.say("🎙️ Couldn't catch that. Say it again or type it.");
           return null;
         }
         await chat.say(`🎙️ I heard: "${truncate(heard, 600)}"`, { replyTo: m.id, format: false });
@@ -400,7 +407,10 @@ export class Inbound {
           `🧠 Model: ${info.model ?? this.d.ctx.config.OPERATOR_MODEL}${info.startedAt ? ` · conversation ${mins(now - info.startedAt)} old` : ''}`,
           `📊 Claude usage: ${governor.describe()}`,
         ];
-        if (info.failedServers.length) lines.push(`⚠️ Not connected: ${info.failedServers.join(', ')}`);
+        if (info.failedServers.length) {
+          const names = info.failedServers.map((s) => s.replace(/\s*\(.*\)$/, '').replace(/^(plugin:[^:]+:|claude\.ai )/, ''));
+          lines.push(`⚠️ Offline (${names.length}): ${names.slice(0, 4).join(', ')}${names.length > 4 ? '…' : ''}`);
+        }
         await chat.say(lines.join('\n'), { format: false });
         return;
       }

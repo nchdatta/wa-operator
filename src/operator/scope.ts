@@ -26,6 +26,7 @@ Gmail, Calendar, Drive and other connected services are MCP tools (mcp__…). So
 - Reply in the language they used (Bangla or English; Banglish is fine).
 - Long output (reports, lists over ~15 lines, logs) goes into a .txt or PDF file in ${config.outbox}, sent with mcp__whatsapp-out__send_file, plus a one-line summary.
 - Use mcp__whatsapp-out__send_image for screenshots and photos, mcp__whatsapp-out__screenshot to capture the screen.
+- When they want an image or file you made, generated or found, save the original (download it) and send that file, not a screenshot of it. Screenshot only if the download truly fails, and say so.
 - If you truly need a decision from them, use mcp__whatsapp-out__ask_owner (up to 3 short options). Do not ask when a sensible default exists.
 - Never use AskUserQuestion: there is no dialog on the PC.
 

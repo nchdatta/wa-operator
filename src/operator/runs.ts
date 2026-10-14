@@ -19,6 +19,8 @@ export class RunQueue {
   private draining = false;
   /** Runs claimed and handed to the pool (counted before the slot reports busy). */
   private active = 0;
+  /** Follow-ups that should continue in the slot that answered the replied-to message. */
+  private readonly preferSlot = new Map<string, number>();
 
   constructor(
     private readonly ctx: AppContext,
@@ -45,8 +47,10 @@ export class RunQueue {
     prompt: string,
     sourceMessageId: string | null,
     origin: 'owner' | 'schedule' = 'owner',
+    preferSlot?: number,
   ): Promise<string> {
     const id = newId();
+    if (preferSlot !== undefined) this.preferSlot.set(id, preferSlot);
     const waiting = this.active >= this.pool.size || this.queuedCount() > 0;
     this.ctx.db
       .insert(operatorRuns)
@@ -120,6 +124,7 @@ export class RunQueue {
         prompt: run.prompt,
         sourceMessageId: run.sourceMessageId,
         origin: run.origin,
+        ...(this.preferSlot.has(run.id) ? { preferSlot: this.preferSlot.get(run.id)! } : {}),
       });
       if (run.sourceMessageId) await this.chat.react(run.sourceMessageId, '⏳');
       result = await pending;
@@ -143,7 +148,13 @@ export class RunQueue {
     });
     if (run.sourceMessageId)
       await this.chat.react(run.sourceMessageId, result.stopped ? '⏹️' : result.ok ? '✅' : '⚠️');
-    await this.chat.notify(result.text, run.sourceMessageId ? { replyTo: run.sourceMessageId } : {});
+    this.preferSlot.delete(run.id);
+    try {
+      const answerId = await this.chat.say(result.text, run.sourceMessageId ? { replyTo: run.sourceMessageId } : {});
+      this.pool.link(answerId, run.id);
+    } catch (e) {
+      this.ctx.logger.warn({ err: errMsg(e) }, 'could not send the task result');
+    }
     this.gate.touch();
   }
 

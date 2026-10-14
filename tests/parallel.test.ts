@@ -7,7 +7,8 @@ import { Gate } from '../src/operator/gate.js';
 import { OwnerQuestions } from '../src/operator/output.js';
 import { SessionPool, type Slot } from '../src/operator/pool.js';
 import { RunQueue } from '../src/operator/runs.js';
-import type { RunHandle, RunResult } from '../src/operator/session.js';
+import { isBrowserTool, type RunHandle, type RunResult } from '../src/operator/session.js';
+import { looksGarbled } from '../src/operator/media.js';
 import { Governor } from '../src/runtime/governor.js';
 import { FakeChannel, flush, makeCtx, OWNER } from './helpers.js';
 
@@ -177,5 +178,44 @@ describe('owner questions', () => {
     expect(await b).toBeNull();
     expect(q.onText('yes')).toBe(true);
     expect(await a).toBe('yes');
+  });
+});
+
+describe('follow-ups and browser', () => {
+  it('a reply to a finished task answer continues in that slot', async () => {
+    const t = setup();
+    await t.gate.setPin('482913');
+    await t.inbound.handle(msg({ pin: { token: t.gate.newPinToken('unlock'), pin: '482913' } }));
+    await t.inbound.handle(msg({ text: 'long report' }));
+    const second = msg({ text: 'draft a post' });
+    await t.inbound.handle(second);
+    await flush();
+    t.b.complete('Here is the post.');
+    await flush();
+    await flush();
+    const answer = t.ch.sent.at(-1)!;
+    expect(answer.kind).toBe('text');
+    t.a.complete('report done');
+    await flush();
+    await flush();
+    // Slot 0 is free too, but the reply belongs to slot 1's conversation.
+    await t.inbound.handle(msg({ text: 'make it shorter', replyToId: second.id }));
+    await flush();
+    expect(t.b.prompts.at(-1)).toMatch(/make it shorter$/);
+    expect(t.a.prompts).toHaveLength(1);
+  });
+
+  it('recognises browser tools', () => {
+    expect(isBrowserTool('mcp__claude-in-chrome__computer')).toBe(true);
+    expect(isBrowserTool('mcp__playwright__browser_click')).toBe(true);
+    expect(isBrowserTool('mcp__browser__browser_evaluate')).toBe(true);
+    expect(isBrowserTool('mcp__claude_ai_Gmail__search_threads')).toBe(false);
+  });
+
+  it('garbled voice transcripts are caught', () => {
+    expect(looksGarbled('그 ಸಱಟರೈಲ್ dropping that fix')).toBe(true);
+    expect(looksGarbled('ছাদ থেকে কাপড় আনব')).toBe(false);
+    expect(looksGarbled('I asked for the time in America.')).toBe(false);
+    expect(looksGarbled('...')).toBe(true);
   });
 });

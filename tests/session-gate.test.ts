@@ -53,6 +53,7 @@ function setup(answer: ApprovalOutcome = { decision: 'approved' }) {
     texts: [],
     lastProgressLabel: '',
     overrides: new Map(),
+    taskAllowed: new Set(),
     stopped: false,
     done: () => {},
   };
@@ -185,5 +186,16 @@ describe('PreToolUse gate', () => {
     expect(missingFile({ command: 'node', args: [path.join(process.cwd(), 'nope', 'mcp.js')] })).toMatch(/mcp.js$/);
     expect(missingFile({ command: 'npx', args: ['-y', 'some-mcp'] })).toBeNull();
     expect(missingFile({ type: 'http', url: 'https://x.example/mcp' })).toBeNull();
+  });
+});
+
+describe('this-task approvals', () => {
+  it('"This task" after reading outside content allows the same tool for the rest of the task only', async () => {
+    const t = setup({ decision: 'approved', remember: true });
+    await t.call('WebFetch', { url: 'https://example.com' });
+    await t.call('mcp__claude-in-chrome__javascript_tool', { text: 'document.title' });
+    expect(t.requests[0]?.remember).toBe('✅ This task');
+    expect((await t.call('mcp__claude-in-chrome__javascript_tool', { text: 'x' })).permissionDecision).toBe('allow');
+    expect(t.requests).toHaveLength(1);
   });
 });

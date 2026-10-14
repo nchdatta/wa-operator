@@ -65,6 +65,8 @@ export interface RunHandle {
   sourceMessageId: string | null;
   /** The owner's request as shown in /queue and on approval cards (prompt may carry added context). */
   title?: string;
+  /** Slot to run in when it is free (a follow-up to that slot's earlier answer). */
+  preferSlot?: number;
   /** schedule: started by a saved schedule. While locked it may only use LOW-tier tools. */
   origin?: 'owner' | 'schedule';
 }
@@ -88,6 +90,8 @@ interface ActiveRun extends RunHandle {
   lastProgressLabel: string;
   /** Owner-confirmed MCP tiers, read once per task. */
   overrides: Map<string, Tier>;
+  /** Tools and commands the owner allowed for the rest of this task (✅ This task). */
+  taskAllowed: Set<string>;
   stopped: boolean;
   done: (r: RunResult) => void;
 }
@@ -232,6 +236,19 @@ function describeTool(name: string, input: Record<string, unknown>): string {
   return 'Working';
 }
 
+export interface BrowserLock {
+  holder: number | null;
+}
+
+/** Tools that drive a browser (Claude in Chrome, Playwright and similar MCP servers). */
+export function isBrowserTool(name: string): boolean {
+  return /^mcp__[^_]*(chrome|browser|playwright|puppeteer)[^_]*__/i.test(name) || /^mcp__[^_]+__browser_/i.test(name);
+}
+
+type Memo = { kind: 'tool' | 'command' | 'task'; key: string };
+
+const REMEMBER_TITLE: Record<Memo['kind'], string> = { tool: '✅ Always', command: '✅ Today', task: '✅ This task' };
+
 const PARALLEL_RULES = `
 ## Parallel task
 You run beside the main conversation, which may be busy with another task. You do not see its history: if a request depends on earlier context you lack, ask in one line. Another task may be using the browser, so open your own tab and leave other tabs alone.
@@ -282,6 +299,8 @@ export class OperatorSession {
     readonly slot = 0,
     /** Another slot is running a task too (approval cards then name the task). */
     private readonly othersRunning: () => boolean = () => false,
+    /** Shared by all slots: one task drives the browser at a time. */
+    private readonly browser: BrowserLock = { holder: null },
   ) {
     this.policy = buildPathPolicy(ctx);
   }
@@ -444,6 +463,14 @@ ${memoryBrief(this.ctx)}`,
         'Operator Mode is locked, so this scheduled task can only read and report. Do not try another way: finish the report and tell them in one line what still needs doing after they unlock.',
       );
     }
+    if (isBrowserTool(toolName)) {
+      if (this.browser.holder !== null && this.browser.holder !== this.slot)
+        return decide(
+          'deny',
+          'Another task is using the browser right now. Do this without the browser if you can; otherwise tell them in one line that it can run once the other task ends.',
+        );
+      this.browser.holder = this.slot;
+    }
     let allowed = false;
     let reason = c.reason;
     const g = this.gate.state();
@@ -454,6 +481,9 @@ ${memoryBrief(this.ctx)}`,
     } else if (memo?.kind === 'command' && this.rememberedCommands.has(memo.key)) {
       allowed = true;
       reason = 'They allowed this command for today.';
+    } else if (memo?.kind === 'task' && run.taskAllowed.has(memo.key)) {
+      allowed = true;
+      reason = 'They allowed this for the rest of the task.';
     } else if (c.tier === 'DENY') {
       audit(this.ctx, { actor: 'claude', action: 'tool.denied', outcome: 'DENY', metadata: meta });
       await this.chat.notify(
@@ -471,7 +501,7 @@ ${memoryBrief(this.ctx)}`,
           tier: c.tier,
           reason: c.reason,
           ...(this.othersRunning() ? { task: run.title ?? run.prompt } : {}),
-          ...(memo ? { remember: memo.kind === 'tool' ? '✅ Always' : '✅ Today' } : {}),
+          ...(memo ? { remember: REMEMBER_TITLE[memo.kind] } : {}),
         },
         signal,
       );
@@ -511,25 +541,28 @@ ${memoryBrief(this.ctx)}`,
 
   /**
    * What "remember" would cover for this call, if anything: an unconfirmed MCP tool with no risk flag
-   * (saved as always allowed), or a plain risk-free command (allowed until the session ends).
+   * (saved as always allowed), a plain risk-free command (allowed until the session ends), or any other
+   * risk-free call, including after the task read outside content (allowed for the rest of this task).
    */
-  private memoKey(
-    toolName: string,
-    input: Record<string, unknown>,
-    c: Classification,
-    tainted: boolean,
-  ): { kind: 'tool' | 'command'; key: string } | null {
-    if (tainted || (c.risks?.length ?? 0) > 0 || (c.tier !== 'HIGH' && c.tier !== 'MEDIUM')) return null;
+  private memoKey(toolName: string, input: Record<string, unknown>, c: Classification, tainted: boolean): Memo | null {
+    if ((c.risks?.length ?? 0) > 0 || (c.tier !== 'HIGH' && c.tier !== 'MEDIUM')) return null;
+    const shell = toolName === 'Bash' || toolName === 'PowerShell';
+    const cmd = typeof input.command === 'string' ? input.command.trim() : '';
+    // After outside content, only the exact same command repeats without asking.
+    if (tainted) return shell ? (cmd ? { kind: 'task', key: `${toolName}:${cmd}` } : null) : { kind: 'task', key: toolName };
     if (c.unconfirmed) return c.unconfirmed.suggested === 'CRITICAL' ? null : { kind: 'tool', key: toolName };
-    if (toolName === 'Bash' || toolName === 'PowerShell') {
-      const cmd = typeof input.command === 'string' ? input.command.trim() : '';
+    if (shell) {
       if (!cmd || /[;&|`$<>\n]/.test(cmd)) return null;
       return { kind: 'command', key: `${toolName}:${cmd.toLowerCase().split(/\s+/).slice(0, 2).join(' ')}` };
     }
-    return null;
+    return { kind: 'task', key: toolName };
   }
 
-  private remember(memo: { kind: 'tool' | 'command'; key: string }, toolName: string, run: ActiveRun): void {
+  private remember(memo: Memo, toolName: string, run: ActiveRun): void {
+    if (memo.kind === 'task') {
+      run.taskAllowed.add(memo.key);
+      return;
+    }
     if (memo.kind === 'command') {
       this.rememberedCommands.add(memo.key);
       return;
@@ -632,6 +665,7 @@ ${memoryBrief(this.ctx)}`,
     const run = this.run;
     if (!run) return;
     this.run = null;
+    if (this.browser.holder === this.slot) this.browser.holder = null;
     this.lastRunEndedAt = this.ctx.clock.now();
     this.allowedToolUses.clear();
     this.questions.cancel(String(this.slot));
@@ -661,6 +695,7 @@ ${memoryBrief(this.ctx)}`,
         texts: [],
         lastProgressLabel: '',
         overrides: this.loadOverrides(),
+        taskAllowed: new Set(),
         stopped: false,
         done,
       };
