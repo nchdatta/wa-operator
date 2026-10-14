@@ -11,14 +11,14 @@ import {
   type SDKMessage,
   type SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
-import { eq, isNotNull } from 'drizzle-orm';
+import { and, desc, eq, gt, isNotNull } from 'drizzle-orm';
 import type { ApprovalEngine } from '../approvals/engine.js';
 import { audit } from '../audit.js';
 import { createBusinessServer } from '../business/server.js';
 import { memoryBrief } from '../business/store.js';
 import type { OwnerChat } from '../channels/owner-chat.js';
 import type { AppContext } from '../context.js';
-import { operatorSessions, toolTiers } from '../persistence/schema.js';
+import { operatorRuns, operatorSessions, toolTiers } from '../persistence/schema.js';
 import type { Governor } from '../runtime/governor.js';
 import { SECRET_NAMES } from '../security/secrets.js';
 import { truncate } from '../security/redact.js';
@@ -257,7 +257,11 @@ You run beside the main conversation, which may be busy with another task. You d
 /** Rough effort pick: multi-step requests get more thinking. */
 export function pickEffort(prompt: string): 'medium' | 'high' {
   return prompt.length > 280 ||
-    /\b(then|and then|after that|every|all|each|report|compare|analy[sz]e|fix|set up)\b/i.test(prompt)
+    /\b(then|and then|after that|every|all|each|report|compare|analy[sz]e|fix|set up)\b/i.test(prompt) ||
+    // Browser and making things need the main model: the fast one gives up on the browser.
+    /\b(open|browse|browser|website|site|chatgpt|facebook|linkedin|youtube|login|log in|download|upload|click|banner|image|picture|design|post|logo|video)\b/i.test(
+      prompt,
+    )
     ? 'high'
     : 'medium';
 }
@@ -285,6 +289,10 @@ export class OperatorSession {
   private startedAt: number | null = null;
   private model: string | null = null;
   private lastRunEndedAt = 0;
+  /** After an idle restart: give the next task a short recap of today's earlier tasks. */
+  private recapNext = false;
+  /** /new: tasks before this are not recapped. */
+  private forgetBefore = 0;
   private readonly policy: PathPolicy;
   private loop: Promise<void> | null = null;
 
@@ -680,7 +688,8 @@ ${memoryBrief(this.ctx)}`,
     // A long gap since the last task: start a fresh conversation so old context doesn't slow every turn.
     if (this.q && freshMs > 0 && this.lastRunEndedAt > 0 && now - this.lastRunEndedAt > freshMs) {
       this.ctx.logger.info('idle gap: starting a fresh conversation');
-      this.newSession();
+      this.closeDay();
+      this.recapNext = true;
     }
     this.ensure();
     const q = this.q!;
@@ -714,7 +723,9 @@ ${memoryBrief(this.ctx)}`,
         this.ctx.logger.debug({ err: errMsg(e) }, 'could not switch model');
       }
     }
-    this.inbox!.push(userMessage(handle.prompt));
+    const recap = this.recapNext ? this.recap(now) : '';
+    this.recapNext = false;
+    this.inbox!.push(userMessage(recap ? `${recap}\n\n${handle.prompt}` : handle.prompt));
     return result;
   }
 
@@ -744,8 +755,32 @@ ${memoryBrief(this.ctx)}`,
     this.close();
   }
 
+  /** Today's last few finished tasks, so a fresh conversation still knows "the post you wrote". */
+  private recap(now: number): string {
+    const since = Math.max(this.forgetBefore, now - 18 * 3600_000);
+    const rows = this.ctx.db
+      .select({ prompt: operatorRuns.prompt, result: operatorRuns.resultPreview })
+      .from(operatorRuns)
+      .where(and(eq(operatorRuns.status, 'done'), gt(operatorRuns.finishedAt, since)))
+      .orderBy(desc(operatorRuns.finishedAt))
+      .limit(5)
+      .all()
+      .filter((r) => r.result)
+      .reverse();
+    if (!rows.length) return '';
+    const line = (t: string, n: number) => truncate(t.replace(/\s+/g, ' '), n);
+    const items = rows.map((r) => `- They asked: ${line(r.prompt, 150)}\n  You answered: ${line(r.result!, 250)}`);
+    return `[Earlier today, for context only:\n${items.join('\n')}]`;
+  }
+
   /** /new: forget today's conversation and start fresh. */
   newSession(): void {
+    this.forgetBefore = this.ctx.clock.now();
+    this.recapNext = false;
+    this.closeDay();
+  }
+
+  private closeDay(): void {
     if (this.day)
       this.ctx.db
         .update(operatorSessions)

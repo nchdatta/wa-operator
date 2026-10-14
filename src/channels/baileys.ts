@@ -14,6 +14,7 @@ import makeWASocket, {
   type WAMessageKey,
   type WASocket,
 } from 'baileys';
+import { parseYesNo } from '../approvals/answers.js';
 import type { Config } from '../config/env.js';
 import type { Logger } from '../observability/logger.js';
 import { ensureDataKey, subKey } from '../security/data-key.js';
@@ -211,7 +212,10 @@ export class BaileysChannel implements Channel {
     replyTo?: string,
   ) {
     const lines = items.map((b, i) => `*${i + 1}.* ${b.title}${b.description ? ` — ${b.description}` : ''}`);
-    const text = [body, '', ...lines, '', footer ?? '', '_Reply with the number._']
+    const hint = items.some((b) => b.id.startsWith('apv:'))
+      ? '_Reply with a number, or just say ok / no._'
+      : '_Reply with the number._';
+    const text = [body, '', ...lines, '', footer ?? '', hint]
       .filter((l, i, a) => l || a[i - 1])
       .join('\n');
     const id = await this.send({ text: text.trim() }, replyTo);
@@ -371,13 +375,19 @@ export class BaileysChannel implements Channel {
 
   private menuPick(text: string, replyToId?: string): string | null {
     const menu = this.menu;
-    const n = /^\s*(\d{1,2})\s*$/.exec(text)?.[1];
-    if (!menu || !n || Date.now() - menu.at > MENU_TTL) return null;
+    if (!menu || Date.now() - menu.at > MENU_TTL) return null;
     if (replyToId && menu.messageId && replyToId !== menu.messageId) return null;
-    const id = menu.ids[Number(n) - 1];
+    const n = /^\s*(\d{1,2})\s*$/.exec(text)?.[1];
+    const id = n ? menu.ids[Number(n) - 1] : answerPick(text, menu.ids);
     if (id) this.menu = null;
     return id ?? null;
   }
+}
+
+/** A one-word answer to an approval card: "ok" approves, "no" cancels, "always" remembers. */
+function answerPick(text: string, ids: string[]): string | undefined {
+  const kind = parseYesNo(text);
+  return kind ? ids.find((i) => i.startsWith(`apv:${kind}:`)) : undefined;
 }
 
 function mediaOf(m: WAMessage): { kind: MediaKind; mime?: string; filename?: string; caption?: string } | null {

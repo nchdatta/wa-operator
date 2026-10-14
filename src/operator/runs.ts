@@ -60,7 +60,7 @@ export class RunQueue {
       const n = this.queuedCount();
       if (sourceMessageId) await this.chat.react(sourceMessageId, '📥');
       await this.chat.notify(
-        `📥 Queued #${n}. /queue to see, /cancel ${this.pool.runningCount() + n} to drop.`,
+        `📥 Got it. I'll start this after the current job (#${this.pool.runningCount() + n}). Say "cancel ${this.pool.runningCount() + n}" to drop it.`,
         sourceMessageId ? { replyTo: sourceMessageId } : {},
       );
     }

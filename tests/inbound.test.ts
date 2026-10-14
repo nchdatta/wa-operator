@@ -123,7 +123,7 @@ describe('inbound', () => {
   it('first message asks for the PIN through the Flow, then runs after unlock', async () => {
     await t.inbound.handle(msg({ text: "What's today?" }));
     const pin = t.ch.last('pin');
-    expect(pin?.prompt).toMatch(/Unlock Operator Mode/);
+    expect(pin?.prompt).toMatch(/locked for safety/);
     expect(t.session.prompts).toHaveLength(0);
     await t.inbound.handle(msg({ pin: { token: pin!.token, pin: '482913' } }));
     await flush();
@@ -154,7 +154,7 @@ describe('inbound', () => {
     await t.inbound.handle(msg({ text: 'first' }));
     await flush();
     await t.inbound.handle(msg({ text: 'second' }));
-    expect(t.ch.texts().at(-1)).toMatch(/Queued/);
+    expect(t.ch.texts().at(-1)).toMatch(/after the current job/);
     expect(t.session.prompts).toEqual(['first']);
     t.session.complete();
     await flush();

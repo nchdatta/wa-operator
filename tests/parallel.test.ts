@@ -107,7 +107,7 @@ describe('parallel tasks', () => {
     expect(t.b.prompts).toEqual(['check today emails']);
     expect(t.ch.texts().some((x) => /Queued/.test(x))).toBe(false);
     await t.inbound.handle(msg({ text: 'who owes us money' }));
-    expect(t.ch.texts().at(-1)).toMatch(/Queued #1/);
+    expect(t.ch.texts().at(-1)).toMatch(/after the current job \(#/);
     t.b.complete('2 emails, nothing urgent.');
     await flush();
     await flush();

@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import { and, eq, gt } from 'drizzle-orm';
 import { audit } from '../audit.js';
+import { parseYesNo } from './answers.js';
 import type { OwnerChat } from '../channels/owner-chat.js';
 import type { AppContext } from '../context.js';
 import type { Gate } from '../operator/gate.js';
@@ -46,6 +47,8 @@ const BUTTON_RE = /^apv:(a|r|e|w):([0-9A-HJKMNP-TV-Z]{26})$/;
 export function approvalButton(kind: ButtonKind, id: string): string {
   return `apv:${kind}:${id}`;
 }
+
+export { parseYesNo };
 
 export function parseApprovalButton(id: string): { kind: ButtonKind; approvalId: string } | null {
   const m = BUTTON_RE.exec(id);
@@ -135,9 +138,7 @@ export function plainAction(toolName: string, input: Record<string, unknown>): s
     case 'PowerShell': {
       const prog = path.basename(str(input.command).trim().split(/\s+/)[0] ?? '').replace(/\.(exe|cmd|bat|ps1)$/i, '');
       const what = str(input.description);
-      return what
-        ? `Run a command on the PC: ${truncate(what, 200)}`
-        : `Run a command on the PC${prog ? ` (${prog})` : ''}`;
+      return what ? `On your PC: ${truncate(what, 200)}` : `Run a program on your PC${prog ? ` (${prog})` : ''}`;
     }
     case 'Write':
       return `Create or overwrite the file "${file(input.file_path)}"`;
@@ -181,19 +182,37 @@ export function plainAction(toolName: string, input: Record<string, unknown>): s
   return lines.join('\n');
 }
 
-/** Tier reasons in plain words. */
+/** Technical reasons → everyday words, most important first. */
+const PLAIN_REASONS: [RegExp, string][] = [
+  [/deletes outside/, 'it deletes files outside your work folders'],
+  [/deletes/, 'it deletes files'],
+  [/payment|pay\b|charge/, 'it involves money'],
+  [/send|reply|forward|publish|post\b|upload|invite/, 'it sends something from your account'],
+  [/installs/, 'it installs software'],
+  [/registry|admin|system|service|scheduled task/, 'it changes PC settings'],
+  [/schedules/, 'it sets up a repeating job'],
+  [/git push|network|new website|internet/, 'it goes on the internet'],
+  [/outside/, 'it touches files outside your work folders'],
+  [/^new tool|^unknown tool/, 'first time using this tool'],
+  [/runs other code|unknown program|variable|grouping|chained|substitution|encoded|redirect|changes files/, 'it runs a script on your PC'],
+  [/^change with|record change|edit /, 'it changes something'],
+  [/^browser /, 'it acts in the browser'],
+];
+
+/** Tier reasons in plain words: at most two short ones, never a list of shell details. */
 export function plainReason(reason: string): string {
-  if (/^new tool /.test(reason)) return 'first time using this tool';
-  if (/^unknown tool/.test(reason)) return 'first time using this tool';
-  if (/^change with /.test(reason)) return 'it changes something';
-  if (/^browser /.test(reason)) return 'it acts in the browser';
-  return reason.replace(/\(.*?wa-operator.*?\)/g, '').trim();
+  const parts = reason.split(/;\s*/);
+  const found = PLAIN_REASONS.filter(([re]) => parts.some((p) => re.test(p))).map(([, text]) => text);
+  if (/after reading outside content/.test(reason)) found.push('it comes right after reading a web page or email');
+  if (!found.length && /owner-confirmed/.test(reason)) found.push('you set this one to always ask');
+  if (found.length) return [...new Set(found)].slice(0, 2).join(', and ');
+  return truncate(reason.replace(/\(.*?wa-operator.*?\)/g, '').trim(), 80);
 }
 
 const HEADERS: Record<ApprovalTier, string> = {
-  MEDIUM: '🟦 OK?',
-  HIGH: '🟧 Approve?',
-  CRITICAL: '🟥 Critical, may not be undoable.',
+  MEDIUM: '🟦 OK to do this?',
+  HIGH: '🟧 OK to do this?',
+  CRITICAL: "🟥 Important, this can't be undone. OK to do this?",
 };
 
 interface Waiter {
@@ -279,7 +298,7 @@ export class ApprovalEngine {
   private async sendCard(id: string, req: ApprovalRequest): Promise<void> {
     const minutes = Math.round(this.ttlMs / 60_000);
     const task = req.task ? `📌 ${truncate(req.task.replace(/\s+/g, ' '), 60)}\n` : '';
-    const body = `${HEADERS[req.tier]}\n${task}\n${plainAction(req.toolName, req.input)}\nWhy: ${plainReason(req.reason)}`;
+    const body = `${HEADERS[req.tier]}\n${task}\n${plainAction(req.toolName, req.input)}\n\nAsking because ${plainReason(req.reason)}.`;
     const footer = `${minutes} min · ${id.slice(-6)}`;
     let cardId: string | null;
     if (req.tier === 'CRITICAL') {
@@ -365,6 +384,14 @@ export class ApprovalEngine {
       await this.chat.notify(`⌛ That request (${tag}) is no longer open. Nothing was done.`);
     }
     return true;
+  }
+
+  /** A typed "ok" / "no" while exactly one card is open answers that card. */
+  async answerTyped(text: string): Promise<boolean> {
+    const kind = parseYesNo(text);
+    if ((kind !== 'a' && kind !== 'r') || this.waiters.size !== 1 || this.awaitingEdit) return false;
+    const [id] = this.waiters.keys();
+    return this.onButton(approvalButton(kind, id!));
   }
 
   /** The PIN for a CRITICAL approval was verified by the gate. */

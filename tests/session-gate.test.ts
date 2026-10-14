@@ -180,6 +180,8 @@ describe('PreToolUse gate', () => {
     expect(pickModel("What's today?", 'opus', 'sonnet')).toBe('sonnet');
     expect(pickModel('Read the price list and then update the stock sheet', 'opus', 'sonnet')).toBe('opus');
     expect(pickModel("What's today?", 'opus', 'off')).toBe('opus');
+    expect(pickModel('open chatgpt and make a banner', 'opus', 'haiku')).toBe('opus');
+    expect(pickModel('can u browse the facebook', 'opus', 'haiku')).toBe('opus');
   });
 
   it('MCP servers whose script path is gone are detected', () => {

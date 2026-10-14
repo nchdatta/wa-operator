@@ -15,13 +15,24 @@ describe('approval card text', () => {
         'new tool mcp__browser__browser_evaluate (suggested HIGH; confirm on the PC with "wa-operator tiers")',
       ),
     ).toBe('first time using this tool');
+    expect(plainReason('owner-confirmed tier for send_message')).toBe('it sends something from your account');
+  });
+
+  it('turns a long list of shell details into one short reason', () => {
+    const r = plainReason(
+      'variable $dir; grouping; variable $path; chained commands; add-type runs other code; unknown program if',
+    );
+    expect(r).toBe('it runs a script on your PC');
+    expect(plainReason('chained commands; deletes inside the work folders')).toBe(
+      'it deletes files, and it runs a script on your PC',
+    );
   });
 
   it('describes commands by their purpose, not their text', () => {
     expect(
       plainAction('PowerShell', { command: 'Get-ChildItem C:/x | Select Name', description: 'List files in Shop' }),
-    ).toBe('Run a command on the PC: List files in Shop');
-    expect(plainAction('Bash', { command: 'git status --short' })).toBe('Run a command on the PC (git)');
+    ).toBe('On your PC: List files in Shop');
+    expect(plainAction('Bash', { command: 'git status --short' })).toBe('Run a program on your PC (git)');
   });
 
   it('shows who and what for sends', () => {

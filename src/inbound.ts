@@ -35,18 +35,56 @@ import { errMsg } from './shared/errors.js';
 
 const UNLOCK_PROMPT_COOLDOWN = 60_000;
 
-const HELP = `Just type what you need. You can send a new task while another runs.
+const HELP = `Just tell me what you need, in your own words (English or Bangla, text or voice). For example:
+• "any new emails today?"
+• "sold 3 bags rice 2400, Rahim took 500 on baki"
+• "make this week's sales report as PDF"
+• "remind me Friday 10am to pay the supplier"
+• "open chatgpt and make a banner"
 
-/queue – running and waiting tasks
-/cancel 2 – stop or drop task 2
-/stop – stop all running tasks
-/status – what's going on
-/menu – quick jobs and routines
-/reminders · /memory
-/briefing 08:00 · /summary 21:00 (off to stop)
-/trust full|on|off – how much runs without asking
-/new – fresh conversation
-/lock · /kill – lock, or stop all and lock`;
+You can send a new job while another is running.
+When I ask before doing something, reply ok or no.
+
+Handy phrases:
+"stop" · "show tasks" · "cancel 2" · "start over" · "what's going on" · "full trust" / "ask me first" · "lock"
+
+(Shortcuts like /stop and /status also work.)`;
+
+/** Everyday phrases for the shortcuts, so nobody has to learn commands. Whole message only. */
+const NATURAL: [RegExp, string][] = [
+  [/^(stop|stop it|stop now|stop that|stop everything|stop all|cancel it|cancel all|cancel that|থামো|বন্ধ করো|থামাও)$/, '/stop'],
+  [/^(?:stop|cancel|drop|remove)(?: task| job)? (?:#|no\.? ?)?(\d{1,3})$/, '/cancel $1'],
+  [/^(help|what can you do|how do i use (?:this|you)|how does this work|commands|কি কি পারো|সাহায্য)$/, '/help'],
+  [/^(menu|show menu|quick jobs)$/, '/menu'],
+  [/^(status|what'?s going on|what are you doing|are you busy|are you working|what'?s happening|কি করছ|কী করছ)$/, '/status'],
+  [/^(queue|show queue|show (?:my )?tasks|my tasks|what'?s queued|what'?s waiting|what'?s running|tasks|jobs)$/, '/queue'],
+  [/^(lock|lock it|lock now|lock up|লক করো)$/, '/lock'],
+  [/^(emergency stop|kill|kill everything|stop everything and lock)$/, '/kill'],
+  [/^(start over|start again|start fresh|fresh start|new chat|new conversation|reset|নতুন করে শুরু)$/, '/new'],
+  [/^(full trust|trust full|trust me fully|don'?t ask(?: me)?(?: anymore)?|stop asking(?: me)?|no need to ask)$/, '/trust full'],
+  [/^(trust on|trust me)$/, '/trust on'],
+  [/^(trust off|ask me first|always ask(?: me)?|be careful)$/, '/trust off'],
+  [/^(reminders|show reminders|my reminders|list reminders)$/, '/reminders'],
+  [/^(memory|what do you remember|show memory|what do you know about (?:me|the business))$/, '/memory'],
+];
+
+/** "stop", "start over", "show tasks"… → the matching shortcut, or null for an ordinary instruction. */
+export function naturalCommand(text: string): string | null {
+  const t = text
+    .trim()
+    .toLowerCase()
+    .replace(/’/g, "'")
+    .replace(/^(please|pls|plz|ok|okay|hey)[,\s]+/, '')
+    .replace(/[,\s]+(please|pls|plz|now)$/, '')
+    .replace(/[.!?।]+$/, '')
+    .trim();
+  if (t.length > 40) return null;
+  for (const [re, cmd] of NATURAL) {
+    const m = re.exec(t);
+    if (m) return cmd.replace('$1', m[1] ?? '');
+  }
+  return null;
+}
 
 /** Short nudges that continue the running task instead of starting a new one. */
 const FOLLOW_UP =
@@ -149,7 +187,10 @@ export class Inbound {
           .catch((e: unknown) => ctx.logger.debug({ err: errMsg(e) }, 'could not clean up the PIN message'));
         return await this.onPin(textPinToken, text);
       }
+      if (text && (await this.d.approvals.answerTyped(text))) return;
       if (text.startsWith('/')) return await this.onCommand(text);
+      const shortcut = text ? naturalCommand(text) : null;
+      if (shortcut) return await this.onCommand(shortcut);
 
       // 3. Instructions.
       const s = gate.state();
@@ -226,7 +267,7 @@ export class Inbound {
     if (!force && now - this.lastUnlockPromptAt < UNLOCK_PROMPT_COOLDOWN) return;
     this.lastUnlockPromptAt = now;
     const token = this.d.gate.newPinToken('unlock');
-    await this.d.chat.requestPin(token, '🔐 Unlock Operator Mode for today.');
+    await this.d.chat.requestPin(token, "🔐 Hi! I'm locked for safety.");
   }
 
   private async onPin(token: string, pin: string): Promise<void> {
@@ -293,7 +334,7 @@ export class Inbound {
       }
     }
     if (!prompt) {
-      await chat.say('⌛ That menu item is no longer there. Send /menu again.');
+      await chat.say('⌛ That menu item is no longer there. Say "menu" again.');
       return;
     }
     await runs.enqueue(prompt, null);
@@ -370,7 +411,7 @@ export class Inbound {
         const n = Number(arg);
         const prompt = Number.isInteger(n) && n > 0 ? await runs.cancel(n) : null;
         await chat.say(
-          prompt ? `⏹️ Stopped: ${truncate(prompt.replace(/\s+/g, ' '), 60)}` : 'No such task. Send /queue for the numbers.',
+          prompt ? `⏹️ Stopped: ${truncate(prompt.replace(/\s+/g, ' '), 60)}` : 'No task with that number. Say "show tasks" to see them.',
         );
         return;
       }
@@ -448,7 +489,7 @@ export class Inbound {
         return;
       case '/new':
         if (session.busy) {
-          await chat.say('A task is running. /stop first.');
+          await chat.say('A task is still running. Say "stop" first.');
           return;
         }
         session.newSession();
@@ -457,7 +498,7 @@ export class Inbound {
         return;
       case '/trust':
         if (arg !== 'on' && arg !== 'off' && arg !== 'full') {
-          await chat.say('Use /trust on, /trust full or /trust off.');
+          await chat.say('Say "full trust", "trust on" or "ask me first".');
           return;
         }
         gate.setTrusted(arg === 'full' ? 'full' : arg === 'on');
@@ -470,7 +511,7 @@ export class Inbound {
         );
         return;
       default:
-        await chat.say(`Unknown command ${cmd}. Send /help for the list.`);
+        await chat.say("I don't know that shortcut. Just tell me what you need in your own words, or say \"help\".");
     }
   }
 }
