@@ -136,7 +136,7 @@ describe('parallel tasks', () => {
     await t.inbound.handle(msg({ text: 'task three' }));
     await flush();
     await t.inbound.handle(msg({ text: '/queue' }));
-    expect(t.ch.texts().at(-1)).toMatch(/1\. ⚙️ task one\n2\. ⚙️ task two\n3\. 📥 task three/);
+    expect(t.ch.texts().at(-1)).toMatch(/1\. task one\n2\. task two\n3\. task three \(waiting\)/);
     await t.inbound.handle(msg({ text: '/cancel 3' }));
     expect(t.ch.texts().at(-1)).toMatch(/Stopped: task three/);
     await t.inbound.handle(msg({ text: '/cancel 1' }));

@@ -267,10 +267,10 @@ export function createWhatsAppOutServer(ctx: AppContext, chat: OwnerChat, questi
           const answer = await questions.ask(options, async (id) => {
             if (options.length) {
               await chat.buttons(
-                `❓ ${args.question}`,
+                `${args.question}`,
                 options.map((title, i) => ({ id: `ask:${id}:${i}`, title })),
               );
-            } else await chat.say(`❓ ${args.question}`);
+            } else await chat.say(`${args.question}`);
           }, slot);
           return answer === null
             ? fail('No answer in time. Choose a safe default or stop.')

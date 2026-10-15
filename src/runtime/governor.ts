@@ -60,14 +60,14 @@ export class Governor {
     if (level === this.notified) return;
     const resets = info.resetsAt ? ` It resets ${this.when(info.resetsAt)}.` : '';
     if (level === 'limited') {
-      await this.notify(`⛔ The Claude subscription limit is reached, so I can't work right now.${resets}`);
+      await this.notify(`The Claude subscription limit is reached, so I can't work right now.${resets}`);
     } else if (level === 'warning' && this.notified === 'ok') {
       const pct = info.utilization !== undefined ? ` (${Math.round(info.utilization * 100)}% used)` : '';
       await this.notify(
-        `⚠️ Claude usage is close to the limit${pct}. Your tasks still go first; routines are paused.${resets}`,
+        `Claude usage is close to the limit${pct}. Your tasks still go first; routines are paused.${resets}`,
       );
     } else if (level === 'ok') {
-      await this.notify('✅ Claude usage is back to normal.');
+      await this.notify('Claude usage is back to normal.');
     }
     audit(this.ctx, { actor: 'system', action: 'governor.level', outcome: level, metadata: { ...info } });
     this.notified = level;

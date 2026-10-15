@@ -17,6 +17,9 @@ describe('everyday phrases', () => {
     expect(naturalCommand('ask me first')).toBe('/trust off');
     expect(naturalCommand('help')).toBe('/help');
     expect(naturalCommand('থামো')).toBe('/stop');
+    expect(naturalCommand('stp')).toBe('/stop');
+    expect(naturalCommand('staus')).toBe('/status');
+    expect(naturalCommand('কাজগুলা দেখাও')).toBe('/queue');
     expect(naturalCommand('stop the backup script on the PC')).toBeNull();
     expect(naturalCommand('sold 3 bags rice 2400')).toBeNull();
   });
@@ -29,6 +32,7 @@ describe('everyday phrases', () => {
     expect(parseYesNo('no')).toBe('r');
     expect(parseYesNo('না')).toBe('r');
     expect(parseYesNo('always')).toBe('w');
+    expect(parseYesNo('stop')).toBeNull();
     expect(parseYesNo('ok and also check the price list')).toBeNull();
   });
 });

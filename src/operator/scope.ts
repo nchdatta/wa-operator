@@ -31,6 +31,7 @@ Gmail, Calendar, Drive and other connected services are MCP tools (mcp__…). So
 ## Browser
 - There is a real Chrome browser on this PC, already logged in to their accounts (browser tools; find them with ToolSearch "browser" or "chrome" if not loaded). When they ask to open, check or use a website or web app (ChatGPT, Facebook, LinkedIn, a shop site…), use it.
 - Never say you can't open a site, or that something "isn't connected", before trying the browser, even if you said so earlier in this conversation. Never open sites with commands like start-process; use the browser tools.
+- Prefer the Playwright browser tools (mcp__playwright__browser_*): they drive the owner's work Chrome profile. Use other browser tools only if Playwright is missing.
 - If a browser tool says several browsers are connected and asks you to choose, don't ask them: call list_connected_browsers and select_browser yourself, picking the one on this PC (${os.hostname()}), or the first one.
 - If the browser tools truly fail, say so in one line and offer the next best way (reading the page directly).
 

@@ -211,9 +211,9 @@ export function plainReason(reason: string): string {
 }
 
 const HEADERS: Record<ApprovalTier, string> = {
-  MEDIUM: '🟦 OK?',
-  HIGH: '🟧 OK?',
-  CRITICAL: "🟥 OK? This can't be undone.",
+  MEDIUM: 'OK?',
+  HIGH: 'OK?',
+  CRITICAL: "OK? This can't be undone.",
 };
 
 interface Waiter {
@@ -302,12 +302,12 @@ export class ApprovalEngine {
     const body = `${HEADERS[req.tier]}\n${plainAction(req.toolName, req.input)}${task}`;
     let cardId: string | null;
     if (req.tier === 'CRITICAL') {
-      cardId = await this.chat.buttons(body, [{ id: approvalButton('r', id), title: '❌ No' }]);
+      cardId = await this.chat.buttons(body, [{ id: approvalButton('r', id), title: 'No' }]);
       const token = this.gate.newPinToken('approval', id);
-      await this.chat.requestPin(token, '🔐 Send your PIN to confirm.');
+      await this.chat.requestPin(token, 'Send your PIN to confirm.');
     } else {
-      const buttons = [{ id: approvalButton('a', id), title: '✅ Yes' }];
-      buttons.push({ id: approvalButton('r', id), title: '❌ No' });
+      const buttons = [{ id: approvalButton('a', id), title: 'Yes' }];
+      buttons.push({ id: approvalButton('r', id), title: 'No' });
       if (req.remember) buttons.push({ id: approvalButton('w', id), title: req.remember });
       cardId = await this.chat.buttons(body, buttons);
     }
@@ -337,7 +337,7 @@ export class ApprovalEngine {
       audit(this.ctx, { actor: 'system', action: 'approval.expired', target: id, outcome: why });
       if (why === 'timeout')
         void this.chat.notify(
-          '⌛ No answer, so I skipped that step.',
+          'No answer, so I skipped that step.',
         );
     }
     return { decision: 'expired' };
@@ -354,17 +354,17 @@ export class ApprovalEngine {
     const row = this.ctx.db.select().from(proposedActions).where(eq(proposedActions.id, b.approvalId)).get();
     const open = row && row.status === 'pending' && row.expiresAt > this.ctx.clock.now() && this.waiters.has(row.id);
     if (!row || !open) {
-      await this.chat.notify('⌛ That question has expired. Nothing was done.');
+      await this.chat.notify('That question has expired. Nothing was done.');
       return true;
     }
     if (b.kind === 'e') {
       if (row.tier !== 'HIGH') return true;
       this.awaitingEdit = row.id;
-      await this.chat.notify('✏️ What should change?');
+      await this.chat.notify('What should change?');
       return true;
     }
     if (b.kind !== 'r' && row.needsPin) {
-      await this.chat.notify('🔐 This one needs your PIN.');
+      await this.chat.notify('This one needs your PIN.');
       return true;
     }
     const status = b.kind === 'r' ? 'rejected' : 'approved';
@@ -378,7 +378,7 @@ export class ApprovalEngine {
       });
       this.resolve(row.id, status === 'approved' && remember ? { decision: status, remember } : { decision: status });
     } else {
-      await this.chat.notify('⌛ That question has expired. Nothing was done.');
+      await this.chat.notify('That question has expired. Nothing was done.');
     }
     return true;
   }
@@ -397,7 +397,7 @@ export class ApprovalEngine {
       audit(this.ctx, { actor: 'owner', action: 'approval.approved', target: approvalId, outcome: 'pin' });
       this.resolve(approvalId, { decision: 'approved' });
     } else {
-      await this.chat.notify('⌛ That question has expired. Nothing was done.');
+      await this.chat.notify('That question has expired. Nothing was done.');
     }
   }
 

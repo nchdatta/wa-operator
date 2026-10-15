@@ -251,7 +251,7 @@ export function isBrowserTool(name: string): boolean {
 
 type Memo = { kind: 'tool' | 'command' | 'task'; key: string };
 
-const REMEMBER_TITLE: Record<Memo['kind'], string> = { tool: '✅ Yes, always', command: '✅ Yes, today', task: '✅ Yes, this job' };
+const REMEMBER_TITLE: Record<Memo['kind'], string> = { tool: 'Yes, always', command: 'Yes, today', task: 'Yes, this job' };
 
 const PARALLEL_RULES = `
 ## Parallel task
@@ -499,7 +499,7 @@ ${memoryBrief(this.ctx)}`,
     } else if (c.tier === 'DENY') {
       audit(this.ctx, { actor: 'claude', action: 'tool.denied', outcome: 'DENY', metadata: meta });
       await this.chat.notify(
-        `🚫 Blocked: ${describeTool(toolName, toolInput).toLowerCase()} (${c.reason.split('; ').find((r) => /secret|dump|blocked|.env|credential/.test(r)) ?? c.reason.split('; ')[0]}).`,
+        `Blocked: ${describeTool(toolName, toolInput).toLowerCase()} (${c.reason.split('; ').find((r) => /secret|dump|blocked|.env|credential/.test(r)) ?? c.reason.split('; ')[0]}).`,
       );
       return decide('deny', `Blocked by Operator Mode: ${c.reason}. This cannot be approved; do not try another way.`);
     } else {
@@ -594,10 +594,10 @@ ${memoryBrief(this.ctx)}`,
       for await (const msg of q) await this.handle(msg);
     } catch (e) {
       this.ctx.logger.error({ err: errMsg(e) }, 'operator session ended with an error');
-      this.finishRun({ ok: false, text: `⚠️ Claude stopped unexpectedly: ${truncate(errMsg(e), 300)}` });
+      this.finishRun({ ok: false, text: `Claude stopped unexpectedly: ${truncate(errMsg(e), 300)}` });
     }
     // The process ended: any open run cannot finish.
-    this.finishRun({ ok: false, text: '⚠️ The Claude session ended. Send your message again.' });
+    this.finishRun({ ok: false, text: 'The Claude session ended. Send your message again.' });
   }
 
   private async handle(msg: SDKMessage): Promise<void> {
@@ -633,7 +633,7 @@ ${memoryBrief(this.ctx)}`,
         ) {
           run.lastProgressAt = now;
           run.lastProgressLabel = label;
-          await this.chat.notify(`⏳ ${label}…`);
+          await this.chat.notify(`${label}…`);
         }
         return;
       }
@@ -650,13 +650,13 @@ ${memoryBrief(this.ctx)}`,
         if (more > 0) return;
         const ok = msg.subtype === 'success' && !msg.is_error;
         const failText = run.stopped
-          ? '⏹️ Stopped.'
+          ? 'Stopped.'
           : msg.subtype === 'error_max_turns'
-            ? '⚠️ That took too many steps, so I stopped. Try a smaller request.'
+            ? 'That took too many steps, so I stopped. Try a smaller request.'
             : msg.subtype === 'success'
               ? ''
-              : '⚠️ Something went wrong while working on that.';
-        this.finishRun({ ok, text: run.texts.join('\n\n') || failText || (run.stopped ? '⏹️ Stopped.' : '✅ Done.') });
+              : 'Something went wrong while working on that.';
+        this.finishRun({ ok, text: run.texts.join('\n\n') || failText || (run.stopped ? 'Stopped.' : 'Done.') });
         return;
       }
       default:
@@ -756,7 +756,7 @@ ${memoryBrief(this.ctx)}`,
   /** Hard stop for /kill: end the process so nothing keeps running. */
   kill(): void {
     if (this.run) this.run.stopped = true;
-    this.finishRun({ ok: false, text: '⏹️ Killed.' });
+    this.finishRun({ ok: false, text: 'Killed.' });
     this.close();
   }
 

@@ -46,19 +46,19 @@ Quick words: stop · tasks · status · lock`;
 
 /** Everyday phrases for the shortcuts, so nobody has to learn commands. Whole message only. */
 const NATURAL: [RegExp, string][] = [
-  [/^(stop|stop it|stop all|cancel it|cancel all|থামো|বন্ধ করো)$/, '/stop'],
-  [/^(?:stop|cancel)(?: task| job)? (?:#|no\.? ?)?(\d{1,3})$/, '/cancel $1'],
-  [/^(help|সাহায্য)$/, '/help'],
+  [/^(stop|stp|stopp|sotp|stop it|stop all|cancel it|cancel all|থামো|থামাও|বন্ধ করো|thamo|bondho koro)$/, '/stop'],
+  [/^(?:stop|cancel|cancle)(?: task| job)? (?:#|no\.? ?)?(\d{1,3})$/, '/cancel $1'],
+  [/^(help|hlp|halp|hepl|সাহায্য)$/, '/help'],
   [/^(menu)$/, '/menu'],
-  [/^(status)$/, '/status'],
-  [/^(tasks|jobs|show tasks|show jobs|queue)$/, '/queue'],
-  [/^(lock|লক করো)$/, '/lock'],
+  [/^(status|staus|stauts|statsu)$/, '/status'],
+  [/^(tasks|taks|tsaks|jobs|show tasks|show jobs|queue|কাজগুলা দেখাও|কাজগুলো দেখাও|কাজ দেখাও|kaj gula dekhao)$/, '/queue'],
+  [/^(lock|লক করো|lock koro)$/, '/lock'],
   [/^(emergency stop)$/, '/kill'],
   [/^(start over|new chat|reset)$/, '/new'],
   [/^(full trust|trust full)$/, '/trust full'],
   [/^(trust on)$/, '/trust on'],
   [/^(trust off|ask me first)$/, '/trust off'],
-  [/^(reminders|show reminders)$/, '/reminders'],
+  [/^(reminders|remindrs|show reminders)$/, '/reminders'],
   [/^(memory|show memory)$/, '/memory'],
 ];
 
@@ -192,12 +192,12 @@ export class Inbound {
         await chat.say(
           s.disabledReason === 'lockout'
             ? '🔒 Operator Mode is locked after 3 wrong PINs. Re-enable it at the PC: wa-operator enable'
-            : '⏸️ Operator Mode is turned off. Turn it on at the PC: wa-operator enable',
+            : 'Operator Mode is turned off. Turn it on at the PC: wa-operator enable',
         );
         return;
       }
       if (!gate.hasPin()) {
-        await chat.say('🔐 No PIN is set yet. Set one at the PC first: wa-operator set-pin');
+        await chat.say('No PIN is set yet. Set one at the PC first: wa-operator set-pin');
         return;
       }
       if (text && this.d.questions.onText(text)) return;
@@ -220,7 +220,7 @@ export class Inbound {
       if (!gate.isUnlocked()) await this.requestUnlock();
     } catch (e) {
       ctx.logger.error({ err: errMsg(e) }, 'inbound: failed to handle owner message');
-      await chat.notify(`⚠️ Sorry, that failed: ${truncate(errMsg(e), 200)}`);
+      await chat.notify(`Sorry, that failed: ${truncate(errMsg(e), 200)}`);
     }
   }
 
@@ -238,16 +238,16 @@ export class Inbound {
       if (m.media.kind === 'audio') {
         if (!ctx.config.WHISPER_URL) {
           await chat.say(
-            "🎙️ I can't listen to voice notes. Tap the 🎤 on your keyboard and speak instead (Gboard and Samsung keyboards support Bangla); it arrives as text.",
+            "I can't listen to voice notes. Tap the 🎤 on your keyboard and speak instead (Gboard and Samsung keyboards support Bangla); it arrives as text.",
           );
           return null;
         }
         const heard = await transcribe(ctx.config.WHISPER_URL, file, this.d.fetchImpl, ctx.config.WHISPER_LANG);
         if (!heard || looksGarbled(heard)) {
-          await chat.say("🎙️ Couldn't catch that. Say it again or type it.");
+          await chat.say("Couldn't catch that. Say it again or type it.");
           return null;
         }
-        await chat.say(`🎙️ I heard: "${truncate(heard, 600)}"`, { replyTo: m.id, format: false });
+        await chat.say(`I heard: "${truncate(heard, 600)}"`, { replyTo: m.id, format: false });
         return heard;
       }
       const caption = m.media.caption?.trim() || `I sent a ${m.media.kind === 'image' ? 'photo' : 'file'}.`;
@@ -261,7 +261,7 @@ export class Inbound {
     if (!force && now - this.lastUnlockPromptAt < UNLOCK_PROMPT_COOLDOWN) return;
     this.lastUnlockPromptAt = now;
     const token = this.d.gate.newPinToken('unlock');
-    await this.d.chat.requestPin(token, "🔐 Hi! I'm locked for safety.");
+    await this.d.chat.requestPin(token, "Hi! I'm locked for safety.");
   }
 
   private async onPin(token: string, pin: string): Promise<void> {
@@ -271,7 +271,7 @@ export class Inbound {
       if (r.purpose === 'unlock') {
         this.lastUnlockPromptAt = 0;
         const queued = runs.queuedCount();
-        await chat.say(queued ? '🔓 Unlocked. Working on it…' : '🔓 Unlocked.');
+        await chat.say(queued ? 'Unlocked. Working on it…' : 'Unlocked.');
         session.ensure();
         void runs.drain();
       } else if (r.approvalId) {
@@ -281,12 +281,12 @@ export class Inbound {
     }
     switch (r.reason) {
       case 'wrong':
-        await chat.say(`❌ Wrong PIN. ${r.remaining} ${r.remaining === 1 ? 'try' : 'tries'} left.`);
+        await chat.say(`Wrong PIN. ${r.remaining} ${r.remaining === 1 ? 'try' : 'tries'} left.`);
         if (r.purpose === 'unlock') await this.requestUnlock(true);
         else if (r.approvalId)
           await chat.requestPin(
             gate.newPinToken('approval', r.approvalId),
-            '🔐 Enter your PIN to approve the critical action.',
+            'Enter your PIN to approve the critical action.',
           );
         return;
       case 'locked_out':
@@ -297,14 +297,14 @@ export class Inbound {
         );
         return;
       case 'bad_token':
-        await chat.say('⌛ That PIN form has expired or was already used.');
+        await chat.say('That PIN form has expired or was already used.');
         if (!gate.isUnlocked() && runs.queuedCount() > 0) await this.requestUnlock(true);
         return;
       case 'no_pin':
-        await chat.say('🔐 No PIN is set yet. Set one at the PC first: wa-operator set-pin');
+        await chat.say('No PIN is set yet. Set one at the PC first: wa-operator set-pin');
         return;
       case 'disabled':
-        await chat.say('⏸️ Operator Mode is turned off at the PC.');
+        await chat.say('Operator Mode is turned off at the PC.');
         return;
     }
   }
@@ -313,7 +313,7 @@ export class Inbound {
     if (id.startsWith('menu:')) return await this.onMenu(id);
     if (await this.d.approvals.onButton(id)) return;
     if (this.d.questions.onButton(id)) return;
-    await this.d.chat.say('⌛ That button is no longer active.');
+    await this.d.chat.say('That button is no longer active.');
   }
 
   private async onMenu(id: string): Promise<void> {
@@ -328,7 +328,7 @@ export class Inbound {
       }
     }
     if (!prompt) {
-      await chat.say('⌛ That menu item is no longer there. Say "menu" again.');
+      await chat.say('That menu item is no longer there. Say "menu" again.');
       return;
     }
     await runs.enqueue(prompt, null);
@@ -372,7 +372,7 @@ export class Inbound {
       time,
     });
     await chat.say(
-      `✅ ${describeSchedule(ctx, s)}\nIf Operator Mode is locked then, it only reads and reports; nothing is changed.`,
+      `${describeSchedule(ctx, s)}\nIf Operator Mode is locked then, it only reads and reports; nothing is changed.`,
       { format: false },
     );
   }
@@ -389,12 +389,14 @@ export class Inbound {
         return;
       case '/stop': {
         if (arg) return await this.onCommand(`/cancel ${arg}`);
+        // Answer an open card with No first, so the job can't carry on while it stops.
+        await this.d.approvals.answerTyped('no');
         const n = session.runningCount();
         if (!n) {
           await chat.say('Nothing is running.');
           return;
         }
-        await chat.say(n > 1 ? `⏹️ Stopping ${n} tasks…` : '⏹️ Stopping…');
+        await chat.say(n > 1 ? `Stopping ${n} tasks…` : 'Stopping…');
         await session.interrupt();
         return;
       }
@@ -405,7 +407,7 @@ export class Inbound {
         const n = Number(arg);
         const prompt = Number.isInteger(n) && n > 0 ? await runs.cancel(n) : null;
         await chat.say(
-          prompt ? `⏹️ Stopped: ${truncate(prompt.replace(/\s+/g, ' '), 60)}` : 'No task with that number. Say "show tasks" to see them.',
+          prompt ? `Stopped: ${truncate(prompt.replace(/\s+/g, ' '), 60)}` : 'No task with that number. Say "show tasks" to see them.',
         );
         return;
       }
@@ -414,7 +416,7 @@ export class Inbound {
         const dropped = runs.clearQueued();
         gate.lock('kill');
         audit(this.d.ctx, { actor: 'owner', action: 'command.kill', outcome: 'ok', metadata: { dropped } });
-        await chat.say('🛑 Stopped everything and locked. Your next message will ask for the PIN.');
+        await chat.say('Stopped everything and locked. Your next message will ask for the PIN.');
         return;
       }
       case '/lock':
@@ -435,15 +437,15 @@ export class Inbound {
         const running = session.runningCount();
         const queued = runs.queuedCount();
         const lines = [
-          s.enabled ? (gate.isUnlocked() ? `🔓 Ready${idleLeft}` : '🔒 Locked') : '⏸️ Turned off at the PC',
-          session.busy ? `⚙️ Working on ${running} job${running > 1 ? 's' : ''}` : '💤 Free',
-          ...(queued ? [`📥 ${queued} waiting`] : []),
+          s.enabled ? (gate.isUnlocked() ? `Ready${idleLeft}` : '🔒 Locked') : 'Turned off at the PC',
+          session.busy ? `Working on ${running} job${running > 1 ? 's' : ''}` : 'Free',
+          ...(queued ? [`${queued} waiting`] : []),
           s.fullTrust
-            ? '🤝 I only ask before sending, deleting or paying'
+            ? 'I only ask before sending, deleting or paying'
             : s.trusted
-              ? '🤝 I ask before most changes'
-              : '🤝 I ask before every change',
-          ...(/^allowed/.test(usage) ? [] : [`📊 ${usage}`]),
+              ? 'I ask before most changes'
+              : 'I ask before every change',
+          ...(/^allowed/.test(usage) ? [] : [`${usage}`]),
         ];
         if (info.failedServers.length) this.d.ctx.logger.info({ offline: info.failedServers }, 'status: offline servers');
         await chat.say(lines.join('\n'), { format: false });
@@ -471,7 +473,7 @@ export class Inbound {
         const rows = listMemory(this.d.ctx);
         await chat.say(
           rows.length
-            ? `${rows.map((r) => `[${r.id}] ${r.kind === 'task' ? '📌' : '•'} ${r.text}`).join('\n')}\n\nTo remove one, say "forget" and its id.`
+            ? `${rows.map((r) => `[${r.id}] ${r.kind === 'task' ? '' : '•'} ${r.text}`).join('\n')}\n\nTo remove one, say "forget" and its id.`
             : 'Nothing remembered yet. Try: "remember that our supplier for rice is Karim Traders".',
           { format: false },
         );
@@ -498,10 +500,10 @@ export class Inbound {
         gate.setTrusted(arg === 'full' ? 'full' : arg === 'on');
         await chat.say(
           arg === 'full'
-            ? '🤝 Full trust: I just do it. I still ask before sending, deleting, installing, paying, or opening a new site after reading a page.'
+            ? 'Full trust: I just do it. I still ask before sending, deleting, installing, paying, or opening a new site after reading a page.'
             : arg === 'on'
-              ? '🤝 Trust on: edits and browsing run. Commands, sends and deletes ask.'
-              : '🤝 Trust off: every change asks first.',
+              ? 'Trust on: edits and browsing run. Commands, sends and deletes ask.'
+              : 'Trust off: every change asks first.',
         );
         return;
       default:

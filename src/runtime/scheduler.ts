@@ -62,7 +62,7 @@ export class Scheduler {
       await this.chat.notify(`⏰ Reminder: ${s.title}${late}\n${s.body === s.title ? '' : s.body}`.trim());
       return;
     }
-    await this.chat.notify(`🔁 Starting scheduled task: ${s.title}${late}`);
+    await this.chat.notify(`Starting scheduled task: ${s.title}${late}`);
     await this.runs.enqueue(
       `[Scheduled task "${s.title}", set up earlier. Do it now and report the result briefly.]\n${s.body}`,
       null,

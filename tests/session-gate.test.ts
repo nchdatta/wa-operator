@@ -153,7 +153,7 @@ describe('PreToolUse gate', () => {
   it('"Always" on a new risk-free MCP tool saves it, so it never asks again', async () => {
     const t = setup({ decision: 'approved', remember: true });
     await t.call('mcp__tools__frobnicate', { query: 'invoice' });
-    expect(t.requests[0]?.remember).toBe('✅ Yes, always');
+    expect(t.requests[0]?.remember).toBe('Yes, always');
     expect(t.ctx.db.select().from(toolTiers).all()[0]?.tier).toBe('LOW');
     await t.call('mcp__tools__frobnicate', { query: 'bill' });
     expect(t.requests).toHaveLength(1);
@@ -168,7 +168,7 @@ describe('PreToolUse gate', () => {
   it('"Today" on a plain command allows the same command again, not chained ones', async () => {
     const t = setup({ decision: 'approved', remember: true });
     await t.call('PowerShell', { command: 'python report.py' });
-    expect(t.requests[0]?.remember).toBe('✅ Yes, today');
+    expect(t.requests[0]?.remember).toBe('Yes, today');
     expect((await t.call('PowerShell', { command: 'python report.py --month 9' })).permissionDecision).toBe('allow');
     expect(t.requests).toHaveLength(1);
     await t.call('PowerShell', { command: 'python report.py; python other.py' });
@@ -196,7 +196,7 @@ describe('this-task approvals', () => {
     const t = setup({ decision: 'approved', remember: true });
     await t.call('WebFetch', { url: 'https://example.com' });
     await t.call('mcp__claude-in-chrome__javascript_tool', { text: 'document.title' });
-    expect(t.requests[0]?.remember).toBe('✅ Yes, this job');
+    expect(t.requests[0]?.remember).toBe('Yes, this job');
     expect((await t.call('mcp__claude-in-chrome__javascript_tool', { text: 'x' })).permissionDecision).toBe('allow');
     expect(t.requests).toHaveLength(1);
   });

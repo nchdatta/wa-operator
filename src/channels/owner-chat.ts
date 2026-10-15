@@ -72,7 +72,7 @@ export class OwnerChat {
 
   async file(filePath: string, opts: { kind: 'document' | 'image'; caption?: string; filename?: string }) {
     if (!this.open()) {
-      await this.hold(`📎 A file is ready: ${opts.filename ?? filePath}. Reply to get it.`);
+      await this.hold(`A file is ready: ${opts.filename ?? filePath}. Reply to get it.`);
       return null;
     }
     return this.channel.sendFile(filePath, opts.caption ? { ...opts, caption: this.clean(opts.caption) } : opts);

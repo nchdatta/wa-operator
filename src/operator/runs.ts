@@ -60,7 +60,7 @@ export class RunQueue {
       const n = this.queuedCount();
       if (sourceMessageId) await this.chat.react(sourceMessageId, '📥');
       await this.chat.notify(
-        `📥 Got it. I'll start this after the current job (#${this.pool.runningCount() + n}). Say "cancel ${this.pool.runningCount() + n}" to drop it.`,
+        `Got it. I'll start this after the current job (#${this.pool.runningCount() + n}). Say "cancel ${this.pool.runningCount() + n}" to drop it.`,
         sourceMessageId ? { replyTo: sourceMessageId } : {},
       );
     }
@@ -113,7 +113,7 @@ export class RunQueue {
   private async execute(run: typeof operatorRuns.$inferSelect): Promise<void> {
     if (!this.governor.canRunOwnerTask()) {
       this.finish(run.id, 'failed', { error: 'usage limit' });
-      await this.chat.notify(`⛔ Claude usage limit reached (${this.governor.describe()}). Try again later.`);
+      await this.chat.notify(`Claude usage limit reached (${this.governor.describe()}). Try again later.`);
       return;
     }
     let result: RunResult;
@@ -131,7 +131,7 @@ export class RunQueue {
     } catch (e) {
       result = {
         ok: false,
-        text: `⚠️ Could not start the task: ${truncate(errMsg(e), 300)}`,
+        text: `Could not start the task: ${truncate(errMsg(e), 300)}`,
         stopped: false,
         toolCalls: 0,
         tainted: false,
@@ -188,9 +188,9 @@ export class RunQueue {
 
   describe(): string {
     const rows = this.list();
-    if (!rows.length) return '💤 Nothing running or queued.';
+    if (!rows.length) return 'Nothing running or queued.';
     const line = (r: (typeof rows)[number]) =>
-      `${r.n}. ${r.running ? '⚙️' : '📥'} ${truncate(r.prompt.replace(/\s+/g, ' '), 60)}`;
+      `${r.n}. ${truncate(r.prompt.replace(/\s+/g, ' '), 60)}${r.running ? '' : ' (waiting)'}`;
     return `${rows.map(line).join('\n')}\n\nSay "cancel 2" (any number) to stop or drop one.`;
   }
 
@@ -228,7 +228,7 @@ export class RunQueue {
     for (const r of open) {
       this.finish(r.id, 'interrupted', {});
       audit(this.ctx, { actor: 'system', action: 'run.interrupted', target: r.id, outcome: 'restart' });
-      await this.chat.notify(`⚠️ PC restarted during: "${truncate(r.prompt, 120)}". Send it again if still needed.`);
+      await this.chat.notify(`PC restarted during: "${truncate(r.prompt, 120)}". Send it again if still needed.`);
     }
   }
 }
