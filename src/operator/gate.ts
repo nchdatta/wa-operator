@@ -103,6 +103,13 @@ export class Gate {
     return token;
   }
 
+  /** True when the text is the owner's PIN (sent with no PIN request open). Never counts as a strike. */
+  async isPin(text: string): Promise<boolean> {
+    const stored = this.pinHash();
+    const t = text.trim();
+    return !!stored && PIN_RE.test(t) && (await verify(stored, t).catch(() => false));
+  }
+
   async submitPin(token: string, pin: string): Promise<PinResult> {
     const now = this.ctx.clock.now();
     const req = this.ctx.db

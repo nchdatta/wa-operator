@@ -562,8 +562,19 @@ export function analyzeShell(command: string, flavor: ShellFlavor, cwd: string, 
   if (/frombase64string|\bdownloadstring\b|\bnet\.webclient\b/i.test(command))
     raise('HIGH', 'decodes or downloads code', 'encoded');
   // Deleting through .NET or the shell (Recycle Bin moves included) still counts as deleting.
-  if (/DeleteFile|DeleteDirectory|RecycleBin|RecycleOption|InvokeVerb\s*\(\s*['"]?delete|\.Delete\s*\(|\bRemove-Item\b/i.test(command))
-    raise('HIGH', 'deletes inside the work folders', 'deletes');
+  if (/DeleteFile|DeleteDirectory|RecycleBin|RecycleOption|InvokeVerb\s*\(\s*['"]?delete|\.Delete\s*\(|\bRemove-Item\b/i.test(command)) {
+    // Targets can hide in variables or .NET calls, so check every path written anywhere in the command:
+    // only when all of them are inside the work folders does it run without asking.
+    const paths = (command.match(/'[^']*'|"[^"]*"|[^\s'";|&(){},]+/g) ?? [])
+      .map((w) => w.replace(/^['"]|['"]$/g, ''))
+      .filter((w) => w !== '' && !/^[[$]/.test(w) && looksLikePath(w));
+    const allInside = paths.length > 0 && paths.every((w) => checkPath(w, cwd, policy).verdict === 'inside');
+    if (allInside) raise('HIGH', 'deletes inside the work folders', 'deletes');
+    else {
+      raise('HIGH', 'deletes outside the work folders', 'deletes');
+      risks.add('confirm');
+    }
+  }
 
   const { toks, dynamic } = lex(command, flavor);
   for (const d of new Set(dynamic)) raise('HIGH', d);
@@ -627,7 +638,8 @@ export function analyzeShell(command: string, flavor: ShellFlavor, cwd: string, 
       raise('HIGH', `${name} changes the system`, 'system');
       risks.add('confirm');
     } else if (DELETE.has(name)) {
-      if (pathVerdicts.length === 0 || outside) {
+      // No literal path here (e.g. a variable): the whole-command check above already decided.
+      if (outside || (pathVerdicts.length === 0 && !risks.has('deletes'))) {
         raise('HIGH', 'deletes outside the work folders', 'deletes');
         risks.add('confirm');
       } else raise('HIGH', 'deletes inside the work folders', 'deletes');

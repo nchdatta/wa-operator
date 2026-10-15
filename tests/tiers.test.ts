@@ -227,6 +227,14 @@ describe('full trust', () => {
     expect(asks('PowerShell', { command: 'Remove-Item D:\\backup -Recurse' })).toBe(true);
     expect(asks('Bash', { command: 'git push origin main' })).toBe(true);
     expect(asks('PowerShell', { command: 'shutdown /s /t 0' })).toBe(true);
+    // Targets hidden in a variable or a .NET call are checked too.
+    expect(asks('PowerShell', { command: "$f='D:\\backup\\x.txt'; if (Test-Path $f) { Remove-Item $f }" })).toBe(true);
+    expect(
+      asks('PowerShell', {
+        command: "[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile('D:\\x.txt','OnlyErrorDialogs','SendToRecycleBin')",
+      }),
+    ).toBe(true);
+    expect(asks('PowerShell', { command: 'Remove-Item $f' })).toBe(true);
     expect(asks('PowerShell', { command: 'winget install foo' })).toBe(false);
     expect(asks('Bash', { command: 'curl https://x.example' })).toBe(false);
     expect(asks('Write', { file_path: path.join(base, 'other.txt'), content: 'x' })).toBe(false);

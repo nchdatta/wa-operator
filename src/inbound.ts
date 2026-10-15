@@ -216,6 +216,11 @@ export class Inbound {
         await chat.say('No PIN is set yet. Set one at the PC first: wa-operator set-pin');
         return;
       }
+      // A PIN with no request open (e.g. sent twice) must never reach Claude as an instruction.
+      if (text && (await gate.isPin(text))) {
+        await chat.say('That looks like your PIN, so I ignored it. Please delete that message from this chat.');
+        return;
+      }
       if (text && this.d.questions.onText(text)) return;
       if (text && this.d.approvals.takeEditNote(text)) return;
 
@@ -291,7 +296,9 @@ export class Inbound {
       if (r.purpose === 'unlock') {
         this.lastUnlockPromptAt = 0;
         const queued = runs.queuedCount();
-        await chat.say(queued ? 'Unlocked. Working on it…' : 'Unlocked.');
+        await chat.say(
+          `${queued ? 'Unlocked. Working on it…' : 'Unlocked.'}\n_Delete your PIN message from this chat (hold it, then Delete for me)._`,
+        );
         session.ensure();
         void runs.drain();
       } else if (r.approvalId) {
