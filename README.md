@@ -1,8 +1,8 @@
 # WhatsApp Operator Mode
 
-The business owner uses Claude from their phone. They message one dedicated WhatsApp number, and Claude works on the shop PC: files, commands, the browser, apps and every connected MCP service. Answers, files and approval requests come back in the same chat.
+WhatsApp Operator Mode is a human-in-the-loop AI agent. The business owner uses it from their phone. They message one dedicated WhatsApp number, and Claude works on the shop PC: files, commands, the browser, apps and every connected MCP service. Answers, files and approval requests come back in the same chat.
 
-The system has one user: the owner. It has no customers, no team, and no other agents. Messages from any other sender are dropped silently and logged.
+The system has one user: the owner. It has no customers, no team, and no other users or bots. Messages from any other sender are dropped silently and logged.
 
 This is a lean project built from the WhatsApp, approval and audit parts of [`../whatsapp-mcp`](../whatsapp-mcp). It runs on Node 24, TypeScript, the Claude Agent SDK on the owner's subscription, SQLite (WAL) with Drizzle, Zod and pino.
 
