@@ -95,11 +95,11 @@ describe('PreToolUse gate', () => {
     expect(t.requests).toHaveLength(1);
   });
 
-  it('CRITICAL always asks, even in trusted mode', async () => {
+  it('deletes outside work folders take one Yes, even in full trust', async () => {
     const t = setup();
-    t.gate.setTrusted(true);
+    t.gate.setTrusted('full');
     await t.call('PowerShell', { command: 'Remove-Item D:\\backup_2024 -Recurse' });
-    expect(t.requests[0]?.tier).toBe('CRITICAL');
+    expect(t.requests[0]?.tier).toBe('HIGH');
   });
 
   it('DENY is blocked without asking and the owner is alerted', async () => {

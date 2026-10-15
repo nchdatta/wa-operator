@@ -18,7 +18,7 @@ export interface ShellAnalysis {
   risks: RiskFlag[];
 }
 
-export type RiskFlag = 'deletes' | 'installs' | 'network' | 'outside' | 'encoded' | 'schedules' | 'sends' | 'system';
+export type RiskFlag = 'confirm' | 'deletes' | 'installs' | 'network' | 'outside' | 'encoded' | 'schedules' | 'sends' | 'system';
 
 type Tok = { t: 'word'; v: string; quoted: boolean } | { t: 'op'; v: string } | { t: 'block'; v: string };
 
@@ -619,11 +619,18 @@ export function analyzeShell(command: string, flavor: ShellFlavor, cwd: string, 
     if (ENV_DUMP.has(name) && (words.length === 0 || CRED_TOOLS.has(name) || /^-p$/.test(words[0]?.v ?? '')))
       raise('DENY', 'dumps environment or stored credentials');
     else if (name === 'env' && words.length === 0) raise('DENY', 'dumps environment');
-    else if (name === 'git' && (words[0]?.v ?? '').toLowerCase() === 'push') raise('CRITICAL', 'git push', 'network');
-    else if (CRITICAL.has(name)) raise('CRITICAL', `${name} changes the system`, 'system');
-    else if (DELETE.has(name)) {
-      if (pathVerdicts.length === 0 || outside) raise('CRITICAL', 'deletes outside the work folders', 'deletes');
-      else raise('HIGH', 'deletes inside the work folders', 'deletes');
+    // Owner's own PC: these take one Yes (no PIN), even in full trust.
+    else if (name === 'git' && (words[0]?.v ?? '').toLowerCase() === 'push') {
+      raise('HIGH', 'git push', 'network');
+      risks.add('confirm');
+    } else if (CRITICAL.has(name)) {
+      raise('HIGH', `${name} changes the system`, 'system');
+      risks.add('confirm');
+    } else if (DELETE.has(name)) {
+      if (pathVerdicts.length === 0 || outside) {
+        raise('HIGH', 'deletes outside the work folders', 'deletes');
+        risks.add('confirm');
+      } else raise('HIGH', 'deletes inside the work folders', 'deletes');
     } else if (NETWORK.has(name)) {
       network = true;
       raise('HIGH', `${name} uses the network`, 'network');

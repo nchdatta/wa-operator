@@ -375,12 +375,12 @@ export function mcpRisks(toolName: string): RiskFlag[] {
 }
 
 /**
- * Full trust still asks for HIGH calls with any risk flag: sends, deletes, installs, network commands,
- * encoded commands, changes outside the work folders and scheduled work. Everything else HIGH runs.
+ * Full trust (the owner's own PC) still asks for: sends to others, encoded commands, and one Yes
+ * ('confirm') for system changes, git push and deletes outside the work folders. Everything else HIGH runs.
  */
-const ASK_IN_FULL_TRUST: ReadonlySet<string> = new Set(['sends', 'deletes', 'installs', 'system', 'encoded', 'network']);
+const ASK_IN_FULL_TRUST: ReadonlySet<string> = new Set(['sends', 'encoded', 'confirm']);
 
-/** Full trust only asks for sending (incl. network commands), deleting, installing, system changes and hidden commands. */
+/** Full trust only asks for sending to others, hidden commands and 'confirm' actions. */
 export function stillAsksInFullTrust(c: Pick<Classification, 'risks'>): boolean {
   return (c.risks ?? []).some((r) => ASK_IN_FULL_TRUST.has(r));
 }

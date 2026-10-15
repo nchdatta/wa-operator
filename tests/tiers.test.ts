@@ -117,16 +117,16 @@ describe('shell commands are parsed', () => {
     expect(ps('Invoke-Expression "dir"')).toBe('HIGH');
   });
 
-  it('deletes: HIGH inside work folders, CRITICAL outside', () => {
+  it('deletes: HIGH inside and outside work folders (outside takes one Yes)', () => {
     expect(ps(`Remove-Item "${path.join(work, 'notes.txt')}"`)).toBe('HIGH');
-    expect(ps('Remove-Item D:\\backup_2024 -Recurse -Force')).toBe('CRITICAL');
-    expect(sh('rm -rf /tmp/whatever')).toBe('CRITICAL');
+    expect(ps('Remove-Item D:\\backup_2024 -Recurse -Force')).toBe('HIGH');
+    expect(sh('rm -rf /tmp/whatever')).toBe('HIGH');
   });
 
-  it('system changes are CRITICAL', () => {
-    expect(ps('shutdown /s /t 0')).toBe('CRITICAL');
-    expect(ps('reg add HKLM\\Software\\X /v Y /d Z')).toBe('CRITICAL');
-    expect(sh('git push origin main')).toBe('CRITICAL');
+  it('system changes and git push are HIGH with one Yes', () => {
+    expect(ps('shutdown /s /t 0')).toBe('HIGH');
+    expect(ps('reg add HKLM\\Software\\X /v Y /d Z')).toBe('HIGH');
+    expect(sh('git push origin main')).toBe('HIGH');
   });
 
   it('secrets and env dumps are DENY, also through the shell', () => {
@@ -219,13 +219,16 @@ describe('full trust', () => {
     expect(asks('mcp__whatsapp-out__send_file', { path: path.join(base, 'x.txt') })).toBe(false);
     expect(asks('mcp__claude_ai_Gmail__get_reply_count', {})).toBe(false);
   });
-  it('still asks for sends, deletes, installs and network; not for edits or schedules', () => {
+  it('asks only for sends and confirm actions; not for work-folder deletes, installs, network, edits or schedules', () => {
     expect(asks('mcp__claude_ai_Gmail__send_message', {})).toBe(true);
-    expect(asks('mcp__claude_ai_Gmail__trash_thread', {})).toBe(true);
+    expect(asks('mcp__claude_ai_Gmail__trash_thread', {})).toBe(false);
     expect(asks('mcp__claude_ai_Gmail__create_draft', {})).toBe(false);
-    expect(asks('PowerShell', { command: 'Remove-Item notes.txt' })).toBe(true);
-    expect(asks('PowerShell', { command: 'winget install foo' })).toBe(true);
-    expect(asks('Bash', { command: 'curl https://x.example' })).toBe(true);
+    expect(asks('PowerShell', { command: 'Remove-Item notes.txt' })).toBe(false);
+    expect(asks('PowerShell', { command: 'Remove-Item D:\\backup -Recurse' })).toBe(true);
+    expect(asks('Bash', { command: 'git push origin main' })).toBe(true);
+    expect(asks('PowerShell', { command: 'shutdown /s /t 0' })).toBe(true);
+    expect(asks('PowerShell', { command: 'winget install foo' })).toBe(false);
+    expect(asks('Bash', { command: 'curl https://x.example' })).toBe(false);
     expect(asks('Write', { file_path: path.join(base, 'other.txt'), content: 'x' })).toBe(false);
     expect(asks('CronCreate', {})).toBe(false);
   });
