@@ -38,17 +38,26 @@ const UNLOCK_PROMPT_COOLDOWN = 60_000;
 
 const HELP = `Just tell me what you need, like you would tell a person. Text or voice, English or Bangla.
 
-For example: "any new emails?" · "sold 3 bags rice 2400" · "this week's sales report as PDF" · "remind me 10am to pay the supplier"
+For example: "any new emails?" · "Acme paid 50k" · "who owes us money?" · "remind me 10am to call John" · "open ChatGPT and make a banner"
 
 I only ask before sending, deleting or paying. Reply yes or no.
 
 Quick words: stop · tasks · status · lock`;
 
+const HELP_BN = `যা দরকার সাধারণভাবে লিখুন বা ভয়েসে বলুন, বাংলা বা ইংরেজিতে।
+
+যেমন: "নতুন মেইল আছে?" · "Acme ৫০ হাজার দিসে" · "কে কে টাকা বাকি রাখসে?" · "কাল ১০টায় জনকে কল দিতে মনে করাইয়ো"
+
+শুধু পাঠানো, মোছা বা টাকা দেওয়ার আগে জিজ্ঞেস করি। হ্যাঁ বা না লিখে উত্তর দিন।
+
+ছোট শব্দ: থামো · কাজগুলা দেখাও · status · লক করো`;
+
 /** Everyday phrases for the shortcuts, so nobody has to learn commands. Whole message only. */
 const NATURAL: [RegExp, string][] = [
   [/^(stop|stp|stopp|sotp|stop it|stop all|cancel it|cancel all|থামো|থামাও|বন্ধ করো|thamo|bondho koro)$/, '/stop'],
   [/^(?:stop|cancel|cancle)(?: task| job)? (?:#|no\.? ?)?(\d{1,3})$/, '/cancel $1'],
-  [/^(help|hlp|halp|hepl|সাহায্য)$/, '/help'],
+  [/^(help|hlp|halp|hepl)$/, '/help'],
+  [/^(সাহায্য|সাহায্য করো|হেল্প)$/, '/help bn'],
   [/^(menu)$/, '/menu'],
   [/^(status|staus|stauts|statsu)$/, '/status'],
   [/^(tasks|taks|tsaks|jobs|show tasks|show jobs|queue|কাজগুলা দেখাও|কাজগুলো দেখাও|কাজ দেখাও|kaj gula dekhao)$/, '/queue'],
@@ -385,7 +394,7 @@ export class Inbound {
         await this.sendMenu();
         return;
       case '/help':
-        await chat.say(HELP, { format: false });
+        await chat.say(arg === 'bn' ? HELP_BN : HELP, { format: false });
         return;
       case '/stop': {
         if (arg) return await this.onCommand(`/cancel ${arg}`);

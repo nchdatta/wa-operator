@@ -16,6 +16,7 @@ describe('everyday phrases', () => {
     expect(naturalCommand('full trust')).toBe('/trust full');
     expect(naturalCommand('ask me first')).toBe('/trust off');
     expect(naturalCommand('help')).toBe('/help');
+    expect(naturalCommand('সাহায্য')).toBe('/help bn');
     expect(naturalCommand('থামো')).toBe('/stop');
     expect(naturalCommand('stp')).toBe('/stop');
     expect(naturalCommand('staus')).toBe('/status');

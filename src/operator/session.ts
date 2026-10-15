@@ -204,19 +204,18 @@ export function buildPathPolicy(ctx: AppContext): PathPolicy {
 }
 
 function describeTool(name: string, input: Record<string, unknown>): string {
-  const base = (v: unknown) => (typeof v === 'string' ? path.basename(v) : '');
   switch (name) {
     case 'Read':
-      return `Reading ${base(input.file_path)}`;
+      return 'Reading files';
     case 'Write':
     case 'Edit':
-      return `Editing ${base(input.file_path)}`;
+      return 'Updating a file';
     case 'Glob':
     case 'Grep':
       return 'Searching files';
     case 'Bash':
     case 'PowerShell':
-      return 'Running a command';
+      return 'Working on your PC';
     case 'WebFetch':
       try {
         return `Opening ${new URL(String(input.url)).hostname}`;
@@ -235,7 +234,8 @@ function describeTool(name: string, input: Record<string, unknown>): string {
     if (/gmail/i.test(server ?? '')) return 'Checking your email';
     if (/calendar/i.test(server ?? '')) return 'Checking your calendar';
     if (server === 'business') return 'Checking your records';
-    return `Using ${(server ?? '').replace(/^claude_ai_/, '')} (${(tool ?? '').replace(/_/g, ' ')})`;
+    if (server === 'whatsapp-out') return /file/.test(tool ?? '') ? 'Sending it to you' : 'Working';
+    return 'Working';
   }
   return 'Working';
 }
@@ -251,7 +251,18 @@ export function isBrowserTool(name: string): boolean {
 
 type Memo = { kind: 'tool' | 'command' | 'task'; key: string };
 
-const REMEMBER_TITLE: Record<Memo['kind'], string> = { tool: 'Yes, always', command: 'Yes, today', task: 'Yes, this job' };
+/**
+ * App tools that remove one item per call (Gmail trash_thread, delete_label…): after one yes, the rest of the
+ * task's calls to the same tool run. Never sends, files on the PC, or shell commands.
+ */
+export function bulkKey(toolName: string, c: Classification): string | null {
+  if (!toolName.startsWith('mcp__') || isBrowserTool(toolName)) return null;
+  const risks = c.risks ?? [];
+  if (!risks.includes('deletes') || risks.some((r) => r !== 'deletes')) return null;
+  return `bulk:${toolName}`;
+}
+
+const REMEMBER_TITLE:Record<Memo['kind'], string> = { tool: 'Yes, always', command: 'Yes, today', task: 'Yes, this job' };
 
 const PARALLEL_RULES = `
 ## Parallel task
@@ -496,6 +507,9 @@ ${memoryBrief(this.ctx)}`,
     } else if (memo?.kind === 'task' && run.taskAllowed.has(memo.key)) {
       allowed = true;
       reason = 'They allowed this for the rest of the task.';
+    } else if (bulkKey(toolName, c) && run.taskAllowed.has(bulkKey(toolName, c)!)) {
+      allowed = true;
+      reason = 'They already said yes to this for every item in this task.';
     } else if (c.tier === 'DENY') {
       audit(this.ctx, { actor: 'claude', action: 'tool.denied', outcome: 'DENY', metadata: meta });
       await this.chat.notify(
@@ -509,7 +523,7 @@ ${memoryBrief(this.ctx)}`,
           runId: run.id,
           toolUseId: toolUseID ?? null,
           toolName,
-          input: toolInput,
+          input: this.withDraftDetails(toolName, toolInput),
           tier: c.tier,
           reason: c.reason,
           ...(this.othersRunning() ? { task: run.title ?? run.prompt } : {}),
@@ -525,6 +539,8 @@ ${memoryBrief(this.ctx)}`,
           reason = 'They approved it.';
           if (c.domain && run.taint.tainted) run.taint.allowDomain(c.domain);
           if (outcome.remember && memo) this.remember(memo, toolName, run);
+          // One yes to "move to Trash" covers the other items in the same task (no card per email).
+          if (bulkKey(toolName, c)) run.taskAllowed.add(bulkKey(toolName, c)!);
           break;
         case 'edit':
           return decide('deny', `They want a change before this runs: "${outcome.note}". Apply it and try again.`);
@@ -543,6 +559,7 @@ ${memoryBrief(this.ctx)}`,
       }
     }
     if (!allowed) return decide('deny', reason);
+    this.noteDraft(toolName, toolInput);
     run.taint.record({ toolName, taints: c.taints, domain: c.domain });
     if (toolUseID) this.allowedToolUses.add(toolUseID);
     audit(this.ctx, { actor: 'claude', action: 'tool.allowed', outcome: c.tier, metadata: meta });
@@ -550,6 +567,25 @@ ${memoryBrief(this.ctx)}`,
   }
 
   private progressPause = false;
+
+  /** To/subject of email drafts made in this session, so "send the draft" cards can say who it goes to. */
+  private drafts = new Map<string, { to?: unknown; subject?: unknown }>();
+  private lastDraft: { to?: unknown; subject?: unknown } | null = null;
+
+  private noteDraft(toolName: string, input: Record<string, unknown>): void {
+    if (!/__(create|update)_draft$/i.test(toolName)) return;
+    const prev = typeof input.draftId === 'string' ? this.drafts.get(input.draftId) : undefined;
+    const d = { to: input.to ?? prev?.to, subject: input.subject ?? prev?.subject };
+    if (typeof input.draftId === 'string') this.drafts.set(input.draftId, d);
+    this.lastDraft = d;
+  }
+
+  /** A send that only names a draft id gets the draft's To and Subject added, for the card only. */
+  private withDraftDetails(toolName: string, input: Record<string, unknown>): Record<string, unknown> {
+    if (!/send/i.test(toolName) || input.to || typeof input.draftId !== 'string') return input;
+    const d = this.drafts.get(input.draftId) ?? this.lastDraft;
+    return d ? { ...input, ...(d.to ? { to: d.to } : {}), ...(d.subject ? { subject: d.subject } : {}) } : input;
+  }
 
   /**
    * What "remember" would cover for this call, if anything: an unconfirmed MCP tool with no risk flag
@@ -627,12 +663,13 @@ ${memoryBrief(this.ctx)}`,
         // Only report a new kind of step, at most once per interval.
         if (
           !this.progressPause &&
-          label !== run.lastProgressLabel &&
+          !run.lastProgressLabel.split("|").includes(label) &&
+          run.lastProgressLabel.split("|").length <= 3 &&
           now - run.startedAt > 15_000 &&
           now - run.lastProgressAt >= every
         ) {
           run.lastProgressAt = now;
-          run.lastProgressLabel = label;
+          run.lastProgressLabel = run.lastProgressLabel ? `${run.lastProgressLabel}|${label}` : label;
           await this.chat.notify(`${label}…`);
         }
         return;

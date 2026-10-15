@@ -159,6 +159,23 @@ describe('PreToolUse gate', () => {
     expect(t.requests).toHaveLength(1);
   });
 
+  it('one yes to trash covers the other emails in the same task; sends still ask each time', async () => {
+    const t = setup();
+    await t.call('mcp__claude_ai_Gmail__trash_thread', { threadId: 'a' });
+    await t.call('mcp__claude_ai_Gmail__trash_thread', { threadId: 'b' });
+    expect(t.requests).toHaveLength(1);
+    await t.call('mcp__claude_ai_Gmail__send_message', { to: 'a@b.c' });
+    await t.call('mcp__claude_ai_Gmail__send_message', { to: 'd@e.f' });
+    expect(t.requests).toHaveLength(3);
+  });
+
+  it('sending a draft shows the draft\'s To and Subject on the card', async () => {
+    const t = setup();
+    await t.call('mcp__claude_ai_Gmail__create_draft', { to: 'jhon@acme.test', subject: 'Delay' });
+    await t.call('mcp__claude_ai_Gmail__send_message', { draftId: 'r-1' });
+    expect(t.requests.at(-1)?.input).toMatchObject({ to: 'jhon@acme.test', subject: 'Delay' });
+  });
+
   it('sends never get a remember button', async () => {
     const t = setup();
     await t.call('mcp__claude_ai_Gmail__send_message', { to: 'a@b.c' });

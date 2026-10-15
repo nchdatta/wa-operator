@@ -38,6 +38,8 @@ describe('approval card text', () => {
   it('shows who and what for sends', () => {
     expect(
       plainAction('mcp__claude_ai_Gmail__send_message', { to: 'a@b.com', subject: 'Invoice', body: 'Hi, attached.' }),
-    ).toBe('Gmail: send message\nTo: a@b.com\nSubject: Invoice\n"Hi, attached."');
+    ).toBe('Send this email\nTo: a@b.com\nSubject: Invoice\n"Hi, attached."');
+    expect(plainAction('mcp__claude_ai_Gmail__send_message', { draftId: 'r-1' })).toBe('Send the email draft');
+    expect(plainAction('mcp__claude_ai_Gmail__trash_thread', { threadId: 'x' })).toMatch(/^Move emails to Trash/);
   });
 });

@@ -175,12 +175,23 @@ export function plainAction(toolName: string, input: Record<string, unknown>): s
   const list = (v: unknown) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string').join(', ') : str(v));
   const to = list(input.to) || list(input.recipient) || list(input.recipients);
   const subject = str(input.subject) || str(input.title);
-  const lines = [`${server}: ${human(tool)}`];
+  const lines = [mailVerb(server, t, Boolean(to)) ?? `${server}: ${human(tool)}`];
   if (to) lines.push(`To: ${truncate(to, 120)}`);
   if (subject) lines.push(`Subject: ${truncate(subject, 150)}`);
   const body = str(input.body) || str(input.text) || str(input.message);
   if (body && !/[{};]|=>|function\s*\(/.test(body)) lines.push(`"${truncate(body, 300)}"`);
   return lines.join('\n');
+}
+
+/** Everyday words for common email actions; null for anything else. */
+function mailVerb(server: string, tool: string, hasTo: boolean): string | null {
+  if (!/mail|outlook/i.test(server)) return null;
+  if (/send/.test(tool)) return hasTo ? 'Send this email' : 'Send the email draft';
+  if (/reply/.test(tool)) return 'Send this reply';
+  if (/forward/.test(tool)) return 'Forward this email';
+  if (/trash|delete/.test(tool)) return 'Move emails to Trash (one yes covers all of them in this job)';
+  if (/spam/.test(tool)) return 'Mark emails as spam';
+  return null;
 }
 
 /** Technical reasons → everyday words, most important first. */

@@ -228,7 +228,7 @@ export class RunQueue {
     for (const r of open) {
       this.finish(r.id, 'interrupted', {});
       audit(this.ctx, { actor: 'system', action: 'run.interrupted', target: r.id, outcome: 'restart' });
-      await this.chat.notify(`PC restarted during: "${truncate(r.prompt, 120)}". Send it again if still needed.`);
+      await this.chat.notify(`I restarted while working on: "${truncate(r.prompt, 120)}". Send it again if still needed.`);
     }
   }
 }
