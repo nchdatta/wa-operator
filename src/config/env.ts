@@ -42,7 +42,7 @@ const EnvSchema = z
     OPERATOR_PIN_HASH: z.string().startsWith('$argon2').optional(),
     /** Folders Claude may change files in. Reads outside them need a tap. */
     OPERATOR_ROOTS: csv.pipe(z.array(z.string()).min(1, 'set at least one work folder')),
-    /** Claude's working directory. Defaults to the first root. */
+    /** Claude's working directory. Defaults to <first root>/WA Operator. */
     OPERATOR_HOME: z.string().optional(),
     /** Where photos and PDFs from the owner are saved. Defaults to <home>/Operator Inbox. */
     OPERATOR_INBOX: z.string().optional(),
@@ -199,7 +199,7 @@ export function buildConfig(env: Record<string, string | undefined>, baseDir: st
   const raw = parsed.data;
   const resolve = (p: string) => expandPath(p, baseDir);
   const roots = raw.OPERATOR_ROOTS.map(resolve);
-  const home = raw.OPERATOR_HOME ? resolve(raw.OPERATOR_HOME) : roots[0]!;
+  const home = raw.OPERATOR_HOME ? resolve(raw.OPERATOR_HOME) : path.join(roots[0]!, 'WA Operator');
   const dataDir = resolve(raw.DATA_DIR);
   return Object.freeze({
     ...raw,
