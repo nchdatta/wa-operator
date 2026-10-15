@@ -1,4 +1,7 @@
+import path from 'node:path';
+import ExcelJS from 'exceljs';
 import { describe, expect, it } from 'vitest';
+import { exportLedger } from '../src/business/export.js';
 import { ApprovalEngine } from '../src/approvals/engine.js';
 import {
   addLedger,
@@ -72,6 +75,23 @@ describe('business store', () => {
       { party: 'Rahim', owed: 300 },
     ]);
     expect(() => addLedger(ctx, [{ kind: 'sale', amount: -5 }])).toThrow(/bad amount/);
+  });
+
+  it('exports the year to Records/Ledger - <year>.xlsx', async () => {
+    const ctx = makeCtx();
+    addLedger(ctx, [
+      { kind: 'sale', amount: 2400, item: 'Rice', qty: 3 },
+      { kind: 'expense', amount: 1850, note: 'electricity' },
+      { kind: 'due', amount: 300, party: 'Rahim' },
+    ]);
+    const r = await exportLedger(ctx, 2026);
+    expect(r.rows).toBe(3);
+    expect(r.file).toBe(path.join(ctx.config.folders.records, 'Ledger - 2026.xlsx'));
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.readFile(r.file);
+    expect(wb.worksheets.map((w) => w.name)).toEqual(['Entries', 'By month', 'Dues now']);
+    expect(wb.getWorksheet('Entries')!.getRow(2).getCell(2).value).toBe('Sale');
+    expect(wb.getWorksheet('By month')!.getRow(2).getCell(7).value).toBe(550);
   });
 
   it('memory, open tasks and routines reach the system prompt; closed ones do not', () => {

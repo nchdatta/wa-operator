@@ -258,7 +258,7 @@ export class Inbound {
     if (m.text !== undefined) return m.text.trim() || null;
     if (m.media) {
       if (m.media.kind === 'sticker') return null;
-      const file = await saveToInbox(ctx, chat, m.media, m.id);
+      const file = await saveToInbox(ctx, chat, m.media);
       audit(ctx, { actor: 'owner', action: 'inbound.media', outcome: m.media.kind, metadata: { file } });
       if (m.media.kind === 'audio') {
         if (!ctx.config.WHISPER_URL) {

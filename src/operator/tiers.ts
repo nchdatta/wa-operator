@@ -403,7 +403,7 @@ function classifyMcp(toolName: string, input: Record<string, unknown>, cwd: stri
   if (toolName.startsWith(BUSINESS_SERVER)) {
     // The owner's own encrypted records. After an email or web page was read, a change could be
     // planted by that content (e.g. a scheduled task), so it asks first.
-    const reads = /_(list|report)$|^today$/.test(tool);
+    const reads = /_(list|report|export)$|^today$/.test(tool);
     if (reads || !ctx.tainted) return { tier: 'LOW', reason: 'business records', taints: false, sends: false };
     return {
       tier: 'HIGH',

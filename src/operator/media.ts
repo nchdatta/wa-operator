@@ -17,19 +17,30 @@ function safeName(name: string): string {
   return name.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_').slice(0, 120);
 }
 
+/** HHmm in the business time zone. */
+function clockKey(now: number, timeZone: string): string {
+  const parts = new Intl.DateTimeFormat('en-GB', { timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+    .formatToParts(now);
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '00';
+  return `${get('hour')}${get('minute')}`;
+}
+
 export async function saveToInbox(
   ctx: AppContext,
   chat: OwnerChat,
   media: NonNullable<OwnerMessage['media']>,
-  messageId: string,
 ): Promise<string> {
   const { data, mime } = await chat.channel.downloadMedia(media.ref, ctx.config.MEDIA_MAX_BYTES);
-  const dir = path.join(ctx.config.inbox, dayKey(ctx.clock.now(), ctx.config.BUSINESS_TIMEZONE));
+  const now = ctx.clock.now();
+  const day = dayKey(now, ctx.config.BUSINESS_TIMEZONE);
+  const dir = path.join(ctx.config.inbox, day.slice(0, 7));
   await fs.promises.mkdir(dir, { recursive: true });
   const ext = media.filename ? path.extname(media.filename) || extFor(mime ?? media.mime) : extFor(mime ?? media.mime);
-  const stem = media.filename
+  // "2026-10-14 1649 - Voice.ogg" or "2026-10-14 1649 - <their file name>.pdf": sorts by time, still readable.
+  const label = media.filename
     ? path.basename(media.filename, path.extname(media.filename))
-    : `${media.kind}-${messageId.slice(-8)}`;
+    : media.kind.charAt(0).toUpperCase() + media.kind.slice(1);
+  const stem = `${day} ${clockKey(now, ctx.config.BUSINESS_TIMEZONE)} - ${label}`;
   let file = path.join(dir, safeName(`${stem}${ext}`));
   for (let i = 2; fs.existsSync(file); i++) file = path.join(dir, safeName(`${stem}-${i}${ext}`));
   await fs.promises.writeFile(file, data);

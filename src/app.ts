@@ -87,7 +87,7 @@ export function createOperatorApp(
     processor,
     scheduler,
     async start() {
-      for (const dir of [ctx.config.home, ctx.config.inbox, ctx.config.outbox]) fs.mkdirSync(dir, { recursive: true });
+      for (const dir of [ctx.config.home, ctx.config.inbox, ctx.config.outbox, ...Object.values(ctx.config.folders)]) fs.mkdirSync(dir, { recursive: true });
       gate.state();
       const expired = approvals.recover();
       if (expired) ctx.logger.info({ expired }, 'expired approvals left open by the last run');

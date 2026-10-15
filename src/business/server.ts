@@ -4,6 +4,7 @@ import { audit } from '../audit.js';
 import type { AppContext } from '../context.js';
 import { dayKey } from '../operator/gate.js';
 import { errMsg } from '../shared/errors.js';
+import { exportLedger } from './export.js';
 import {
   addLedger,
   addSchedule,
@@ -160,6 +161,21 @@ export function createBusinessServer(ctx: AppContext) {
               : 'No entries.',
           ].join('\n');
         }),
+      ),
+      tool(
+        'ledger_export',
+        'Write the ledger for a year to the Excel file Records/Ledger - <year>.xlsx (entries, monthly totals, dues), replacing the old copy. Use when they want to see or open their records, or after a report.',
+        { year: z.number().int().min(2000).max(2100).optional().describe('Defaults to this year') },
+        async (a) => {
+          try {
+            const year = a.year ?? Number(dayKey(ctx.clock.now(), ctx.config.BUSINESS_TIMEZONE).slice(0, 4));
+            const r = await exportLedger(ctx, year);
+            audit(ctx, { actor: 'claude', action: 'business.ledger_export', outcome: 'ok' });
+            return ok(`Saved ${r.rows} entries to ${r.file}.`);
+          } catch (e) {
+            return fail(`Not done: ${errMsg(e)}`);
+          }
+        },
       ),
       tool(
         'ledger_list',

@@ -44,9 +44,9 @@ const EnvSchema = z
     OPERATOR_ROOTS: csv.pipe(z.array(z.string()).min(1, 'set at least one work folder')),
     /** Claude's working directory. Defaults to <first root>/WA Operator. */
     OPERATOR_HOME: z.string().optional(),
-    /** Where photos and PDFs from the owner are saved. Defaults to <home>/Operator Inbox. */
+    /** Where photos and PDFs from the owner are saved. Defaults to <home>/Inbox. */
     OPERATOR_INBOX: z.string().optional(),
-    /** Where Claude puts files it sends back. Defaults to <home>/Operator Outbox. */
+    /** Where Claude puts files it sends back. Defaults to <home>/Outbox. */
     OPERATOR_OUTBOX: z.string().optional(),
     OPERATOR_IDLE_MIN: int(1, 24 * 60).default(30),
     OPERATOR_MODEL: z.string().min(1).max(80).default('opus'),
@@ -172,6 +172,8 @@ export interface Config extends RawEnv {
   home: string;
   inbox: string;
   outbox: string;
+  /** Fixed folders inside home where Claude files documents, records and notes. */
+  folders: { clients: string; reports: string; records: string; notes: string };
   graphBaseUrl: string;
 }
 
@@ -210,8 +212,14 @@ export function buildConfig(env: Record<string, string | undefined>, baseDir: st
     logFile: raw.LOG_FILE ? resolve(raw.LOG_FILE) : undefined,
     roots,
     home,
-    inbox: raw.OPERATOR_INBOX ? resolve(raw.OPERATOR_INBOX) : path.join(home, 'Operator Inbox'),
-    outbox: raw.OPERATOR_OUTBOX ? resolve(raw.OPERATOR_OUTBOX) : path.join(home, 'Operator Outbox'),
+    inbox: raw.OPERATOR_INBOX ? resolve(raw.OPERATOR_INBOX) : path.join(home, 'Inbox'),
+    outbox: raw.OPERATOR_OUTBOX ? resolve(raw.OPERATOR_OUTBOX) : path.join(home, 'Outbox'),
+    folders: {
+      clients: path.join(home, 'Clients'),
+      reports: path.join(home, 'Reports'),
+      records: path.join(home, 'Records'),
+      notes: path.join(home, 'Notes'),
+    },
     graphBaseUrl: `${raw.WHATSAPP_GRAPH_BASE_URL.replace(/\/$/, '')}/${raw.WHATSAPP_API_VERSION}`,
   });
 }
