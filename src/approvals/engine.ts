@@ -30,6 +30,8 @@ export interface ApprovalRequest {
   task?: string;
   /** Offer a "remember" button (replaces ✏️ Edit) with this title, e.g. "✅ Always" or "✅ Today". */
   remember?: string;
+  /** The owner wrote in Bangla: card header, buttons and PIN prompt in Bangla. */
+  bangla?: boolean;
 }
 
 export type ApprovalOutcome =
@@ -221,6 +223,12 @@ export function plainReason(reason: string): string {
   return truncate(reason.replace(/\(.*?wa-operator.*?\)/g, '').trim(), 80);
 }
 
+const HEADERS_BN: Record<ApprovalTier, string> = {
+  MEDIUM: 'ঠিক আছে?',
+  HIGH: 'ঠিক আছে?',
+  CRITICAL: 'ঠিক আছে? এটা আর ফেরানো যাবে না।',
+};
+
 const HEADERS: Record<ApprovalTier, string> = {
   MEDIUM: 'OK?',
   HIGH: 'OK?',
@@ -310,15 +318,17 @@ export class ApprovalEngine {
   private async sendCard(id: string, req: ApprovalRequest): Promise<void> {
     // Short on purpose: what it is, yes or no. The reason and ID stay in the audit log.
     const task = req.task ? `\n(for: ${truncate(req.task.replace(/\s+/g, ' '), 50)})` : '';
-    const body = `${HEADERS[req.tier]}\n${plainAction(req.toolName, req.input)}${task}`;
+    const bn = req.bangla === true;
+    const [yes, no] = bn ? ['হ্যাঁ', 'না'] : ['Yes', 'No'];
+    const body = `${(bn ? HEADERS_BN : HEADERS)[req.tier]}\n${plainAction(req.toolName, req.input)}${task}`;
     let cardId: string | null;
     if (req.tier === 'CRITICAL') {
-      cardId = await this.chat.buttons(body, [{ id: approvalButton('r', id), title: 'No' }]);
+      cardId = await this.chat.buttons(body, [{ id: approvalButton('r', id), title: no }]);
       const token = this.gate.newPinToken('approval', id);
-      await this.chat.requestPin(token, 'Send your PIN to confirm.');
+      await this.chat.requestPin(token, bn ? 'নিশ্চিত করতে PIN পাঠান।' : 'Send your PIN to confirm.');
     } else {
-      const buttons = [{ id: approvalButton('a', id), title: 'Yes' }];
-      buttons.push({ id: approvalButton('r', id), title: 'No' });
+      const buttons = [{ id: approvalButton('a', id), title: yes }];
+      buttons.push({ id: approvalButton('r', id), title: no });
       if (req.remember) buttons.push({ id: approvalButton('w', id), title: req.remember });
       cardId = await this.chat.buttons(body, buttons);
     }

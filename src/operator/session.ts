@@ -301,6 +301,8 @@ export class OperatorSession {
   /** Commands the owner tapped "✅ Today" for (tool + first two words), until the session ends. */
   private readonly rememberedCommands = new Set<string>();
   private failedServers: string[] = [];
+  /** Shared by all parallel sessions, so the same failure is logged once. */
+  private static lastFailedSigShared = '';
   private startedAt: number | null = null;
   private model: string | null = null;
   private lastRunEndedAt = 0;
@@ -528,6 +530,7 @@ ${memoryBrief(this.ctx)}`,
           reason: c.reason,
           ...(this.othersRunning() ? { task: run.title ?? run.prompt } : {}),
           ...(memo ? { remember: REMEMBER_TITLE[memo.kind] } : {}),
+          ...(/[ঀ-৿]/.test(run.prompt) ? { bangla: true } : {}),
         },
         signal,
       );
@@ -547,7 +550,7 @@ ${memoryBrief(this.ctx)}`,
         case 'rejected':
           return decide(
             'deny',
-            'They said no, so this was not done. Do not try to do it another way. Acknowledge it in a few words, speaking to them as "you" (e.g. "OK, I didn\'t send it.").',
+            'They said no, so this was not done. Do not try to do it another way. Acknowledge it in a few words, in the language they wrote in, speaking to them as "you" (e.g. "OK, I didn\'t send it." / "ঠিক আছে, পাঠাইনি।").',
           );
         case 'expired':
           return decide(
@@ -648,7 +651,11 @@ ${memoryBrief(this.ctx)}`,
             ...this.failedServers.filter((s) => s.includes('(missing')),
             ...failed.map((s) => `${s.name} (${s.status})`),
           ];
-          if (failed.length) this.ctx.logger.warn({ servers: failed }, 'some MCP servers did not connect');
+          // Logged once per change, not on every task.
+          const sig = failed.map((s) => `${s.name}:${s.status}`).sort().join(',');
+          if (failed.length && sig !== OperatorSession.lastFailedSigShared)
+            this.ctx.logger.warn({ servers: failed }, 'some MCP servers did not connect');
+          OperatorSession.lastFailedSigShared = sig;
         }
         return;
       case 'assistant': {

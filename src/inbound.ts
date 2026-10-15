@@ -71,6 +71,13 @@ const NATURAL: [RegExp, string][] = [
   [/^(memory|show memory)$/, '/memory'],
 ];
 
+/** "hi", "helo", "good morning", "হাই"… with nothing else asked. */
+export function isGreeting(text: string): boolean {
+  return /^(hi+|hey+|hello+|helo+|hlw|hii+|yo|salam|assalamu ?alaikum|good ?(morning|mrng|afternoon|evening|night)|gm|হাই|হ্যালো|সালাম|আসসালামু আলাইকুম)[\s!.,?]*$/iu.test(
+    text.trim(),
+  );
+}
+
 /** "stop", "start over", "show tasks"… → the matching shortcut, or null for an ordinary instruction. */
 export function naturalCommand(text: string): string | null {
   const t = text
@@ -225,6 +232,10 @@ export class Inbound {
       }
       // A reply to a finished task's request or answer continues in that task's conversation.
       const slot = m.replyToId ? this.d.session.slotFor(m.replyToId) : undefined;
+      // While locked, a plain greeting or a repeat of a waiting message only asks for the PIN again:
+      // otherwise "hi", "hi", "hello" become three separate answers after unlock.
+      const waiting = this.d.runs.list().some((r) => !r.running && r.prompt.trim().toLowerCase() === prompt.toLowerCase());
+      if (!gate.isUnlocked() && (isGreeting(prompt) || waiting)) return await this.requestUnlock();
       await this.d.runs.enqueue(prompt, m.id, 'owner', slot);
       if (!gate.isUnlocked()) await this.requestUnlock();
     } catch (e) {

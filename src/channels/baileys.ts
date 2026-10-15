@@ -216,7 +216,9 @@ export class BaileysChannel implements Channel {
   ) {
     const lines = items.map((b, i) => `*${i + 1}.* ${b.title}${b.description ? ` — ${b.description}` : ''}`);
     const hint = items.some((b) => b.id.startsWith('apv:'))
-      ? '_Reply yes or no._'
+      ? /[ঀ-৿]/.test(items[0]?.title ?? '')
+        ? '_হ্যাঁ বা না লিখুন।_'
+        : '_Reply yes or no._'
       : '_Reply with the number._';
     const text = [body, '', ...lines, '', footer ?? '', hint]
       .filter((l, i, a) => l || a[i - 1])

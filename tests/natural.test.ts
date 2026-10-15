@@ -55,3 +55,13 @@ describe('recycle bin deletes', () => {
     expect(analyzeShell(cmd, 'powershell', process.cwd(), { roots: [], denyPaths: [], denyNames: [] }).risks).toContain('deletes');
   });
 });
+
+describe('greetings', () => {
+  it('plain greetings are recognised, requests are not', async () => {
+    const { isGreeting } = await import('../src/inbound.js');
+    expect(isGreeting('helo')).toBe(true);
+    expect(isGreeting('Hi!')).toBe(true);
+    expect(isGreeting('হাই')).toBe(true);
+    expect(isGreeting('hi, any new email?')).toBe(false);
+  });
+});
