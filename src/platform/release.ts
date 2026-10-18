@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { appRoot } from '../config/env.js';
@@ -60,15 +60,24 @@ export function handOver(mode: 'update' | 'uninstall'): void {
   const env = { ...process.env, WAOP_MODE: mode, WAOP_WAIT_PID: String(process.pid) };
   const local = path.join(appRoot(), 'scripts', WIN ? 'install.ps1' : 'install.sh');
   if (WIN) {
-    const cmd =
-      mode === 'update'
-        ? `irm '${installerUrl()}' | iex`
-        : `& '${local.replace(/'/g, "''")}'`;
-    spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', cmd], {
-      env,
-      detached: true,
-      stdio: 'ignore',
-    }).unref();
+    const run = mode === 'update' ? `irm '${installerUrl()}' | iex` : `& '${local.replace(/'/g, "''")}'`;
+    // A visible window that stays open, so progress and any error can be read.
+    const script = [
+      `$Host.UI.RawUI.WindowTitle = 'WA Operator ${mode}'`,
+      `try { ${run} } catch { Write-Host "\`n${mode === 'update' ? 'Update' : 'Uninstall'} failed: $($_.Exception.Message)" -ForegroundColor Red }`,
+      `Read-Host "\`nPress Enter to close"`,
+    ].join('\n');
+    const encoded = Buffer.from(script, 'utf16le').toString('base64');
+    // Node's detached processes get no console on Windows; Start-Process opens a normal window.
+    spawnSync(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-Command',
+        `Start-Process powershell.exe -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand','${encoded}'`,
+      ],
+      { env, windowsHide: true },
+    );
     return;
   }
   const cmd = mode === 'update' ? `curl -fsSL '${installerUrl()}' | bash` : `bash '${local}'`;

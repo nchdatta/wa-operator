@@ -33,6 +33,12 @@ function Install-WaOperator {
     if (Test-Path "$dir\node.exe") {
       & "$dir\node.exe" "$dir\dist\bin\control.js" stop 2>$null | Out-Null
     }
+    # Windows cannot replace files that are still running: wait for every program from the app folder
+    # (service, whisper, Claude Code it started) to exit, then end any that hang.
+    $mine = { Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($dir, 'OrdinalIgnoreCase') } }
+    for ($i = 0; $i -lt 20 -and (& $mine); $i++) { Start-Sleep -Milliseconds 500 }
+    & $mine | Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 500
   }
 
   if ($mode -eq 'uninstall') {
@@ -63,9 +69,23 @@ function Install-WaOperator {
     Step 'Installing'
     $wasInstalled = Test-Path "$dir\node.exe"
     Stop-App
-    if (Test-Path $dir) { Remove-Item -Recurse -Force $dir }
+    # Rename the old copy aside first: that fails cleanly if a file is still in use, instead of
+    # leaving a half-deleted app. On any failure the old copy goes back and starts again.
+    $old = "$dir.old"
+    Remove-Item -Recurse -Force $old -ErrorAction SilentlyContinue
     New-Item -ItemType Directory -Force -Path (Split-Path $dir) | Out-Null
-    Move-Item $new $dir
+    try {
+      if (Test-Path $dir) { Rename-Item $dir $old }
+      Move-Item $new $dir
+    } catch {
+      if ((Test-Path $old) -and -not (Test-Path "$dir\node.exe")) {
+        Remove-Item -Recurse -Force $dir -ErrorAction SilentlyContinue
+        Rename-Item $old $dir
+      }
+      if ($wasInstalled) { & "$dir\node.exe" "$dir\dist\bin\control.js" start 2>$null | Out-Null }
+      throw "could not replace the app folder ($($_.Exception.Message)). The old version is still installed and running. Close any window using it and try again."
+    }
+    Remove-Item -Recurse -Force $old -ErrorAction SilentlyContinue
     New-Item -ItemType File -Force -Path "$dir\.installed" | Out-Null
     New-Item -ItemType Directory -Force -Path $state | Out-Null
     Set-UserPath $true
