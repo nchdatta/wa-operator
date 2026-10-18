@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # WA Operator installer for macOS and Linux. Install or update with one line in a terminal:
-#   curl -fsSL https://wa-operator.wa-operator.workers.dev/install.sh | bash
+#   curl -fsSL https://github.com/nchdatta/wa-operator/releases/latest/download/install.sh | bash
 # Needs no sudo. The app goes to ~/.local/share/wa-operator with the command in ~/.local/bin; settings
 # and data stay in ~/Library/Application Support/wa-operator (macOS) or ~/.config/wa-operator (Linux),
 # so updates keep them. "wa-operator update" and "wa-operator uninstall" run this same script.
 set -euo pipefail
 
-BASE="${WAOP_DOWNLOADS:-https://wa-operator.wa-operator.workers.dev}"
+BASE="https://github.com/${WAOP_REPO:-nchdatta/wa-operator}/releases/latest/download"
 MODE="${WAOP_MODE:-install}"
 DIR="$HOME/.local/share/wa-operator"
 BIN="$HOME/.local/bin"

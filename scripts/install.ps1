@@ -1,5 +1,5 @@
 # WA Operator installer for Windows. Install or update with one line in PowerShell:
-#   irm https://wa-operator.wa-operator.workers.dev/install.ps1 | iex
+#   irm https://github.com/nchdatta/wa-operator/releases/latest/download/install.ps1 | iex
 # Needs no admin rights. The app goes to %LOCALAPPDATA%\Programs\WA Operator; settings and data stay in
 # %APPDATA%\wa-operator, so updates and reinstalls keep them. "wa-operator update" and
 # "wa-operator uninstall" run this same script (WAOP_MODE = update / uninstall).
@@ -9,7 +9,8 @@ function Install-WaOperator {
   $ProgressPreference = 'SilentlyContinue'  # Invoke-WebRequest is many times slower with the progress bar
   [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-  $base = if ($env:WAOP_DOWNLOADS) { $env:WAOP_DOWNLOADS } else { 'https://wa-operator.wa-operator.workers.dev' }
+  $repo = if ($env:WAOP_REPO) { $env:WAOP_REPO } else { 'nchdatta/wa-operator' }
+  $base = "https://github.com/$repo/releases/latest/download"
   $mode = if ($env:WAOP_MODE) { $env:WAOP_MODE } else { 'install' }
   $dir = Join-Path $env:LOCALAPPDATA 'Programs\WA Operator'
   $state = Join-Path $env:APPDATA 'wa-operator'

@@ -1,7 +1,0 @@
-name = "wa-operator"
-main = "worker.js"
-compatibility_date = "2026-09-01"
-
-[vars]
-GITHUB_REPO = "nchdatta/wa-operator"
-# Secret (read-only token, see README "Downloads"):  npx wrangler secret put GH_TOKEN

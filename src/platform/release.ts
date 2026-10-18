@@ -4,14 +4,13 @@ import path from 'node:path';
 import { appRoot } from '../config/env.js';
 
 /**
- * Releases are published in the private repo and handed out by the downloads Worker
- * (scripts/downloads), so clients need no GitHub login.
+ * Releases are published on this (public) repo's GitHub Releases page; anyone can download them.
  * The installer scripts do the real work for install, update and uninstall; this side only checks
  * versions and hands over, because on Windows a running node.exe cannot replace its own folder.
  */
 
-/** The downloads Worker. Set once after "wrangler deploy" (see README "Downloads"). */
-export const DOWNLOADS_URL = (process.env.WAOP_DOWNLOADS ?? 'https://wa-operator.wa-operator.workers.dev').replace(/\/$/, '');
+export const REPO = process.env.WAOP_REPO ?? 'nchdatta/wa-operator';
+const DOWNLOADS_URL = `https://github.com/${REPO}/releases/latest/download`;
 const WIN = process.platform === 'win32';
 
 export function installerUrl(): string {
@@ -42,11 +41,15 @@ export function isNewer(latest: string, current: string): boolean {
 }
 
 export async function latestVersion(fetchImpl: typeof fetch = fetch): Promise<string> {
-  const res = await fetchImpl(`${DOWNLOADS_URL}/latest`, { signal: AbortSignal.timeout(15_000) });
-  if (!res.ok) throw new Error(`could not check for updates (HTTP ${res.status})`);
-  const body = (await res.json()) as { version?: string };
-  if (!body.version) throw new Error('no release published yet');
-  return body.version;
+  const res = await fetchImpl(`https://api.github.com/repos/${REPO}/releases/latest`, {
+    headers: { accept: 'application/vnd.github+json', 'user-agent': 'wa-operator' },
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (res.status === 404) throw new Error('no release published yet');
+  if (!res.ok) throw new Error(`could not check for updates (GitHub HTTP ${res.status})`);
+  const body = (await res.json()) as { tag_name?: string };
+  if (!body.tag_name) throw new Error('the latest release has no version tag');
+  return body.tag_name.replace(/^v/, '');
 }
 
 /**

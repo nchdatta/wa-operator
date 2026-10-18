@@ -59,21 +59,16 @@ One line, with no git, Node or npm needed. It installs WA Operator and Claude Co
 
 Windows (PowerShell):
 ```
-irm https://wa-operator.wa-operator.workers.dev/install.ps1 | iex
+irm https://github.com/nchdatta/wa-operator/releases/latest/download/install.ps1 | iex
 ```
 macOS / Linux:
 ```
-curl -fsSL https://wa-operator.wa-operator.workers.dev/install.sh | bash
+curl -fsSL https://github.com/nchdatta/wa-operator/releases/latest/download/install.sh | bash
 ```
 
 Then, in any terminal: `wa-operator setup [--advanced]`, `start`, `stop`, `restart`, `running`, `update`, `uninstall`, plus the PC commands above (`wa-operator tiers`, `wa-operator set-pin`…). The app lives in `%LOCALAPPDATA%\Programs\WA Operator` or `~/.local/share/wa-operator`. Settings and data live in `%APPDATA%\wa-operator`, `~/Library/Application Support/wa-operator` or `~/.config/wa-operator`, so updates keep them.
 
 Releasing: bump `version` in package.json, then `git tag v<version> && git push --tags`. `.github/workflows/release.yml` builds every platform (`node scripts/package.mjs`) and publishes a release in this repo.
-
-Downloads: the repo is private, so clients download through a Cloudflare Worker ([scripts/downloads](scripts/downloads)) that reads the latest release with a read-only token. Once:
-1. GitHub → Settings → Developer settings → Fine-grained tokens: repository `nchdatta/wa-operator` only, permission **Contents: Read-only**.
-2. `cd scripts/downloads && npx wrangler login && npx wrangler secret put GH_TOKEN` (paste the token) `&& npx wrangler deploy`.
-3. Replace `https://wa-operator.wa-operator.workers.dev` with the address deploy prints (in this README, `src/platform/release.ts`, `scripts/install.ps1`, `scripts/install.sh`).
 
 ## Setup from a git checkout
 
