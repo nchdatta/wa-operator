@@ -9,7 +9,16 @@ import { parse as parseDotenv } from 'dotenv';
 import { eq } from 'drizzle-orm';
 import { recentAudit } from '../audit.js';
 import { BaileysChannel, baileysAuthDir } from '../channels/baileys.js';
-import { ConfigError, envFilePath, expandPath, hint, isInstalled, loadConfig, stateDir, type Config } from '../config/env.js';
+import {
+  ConfigError,
+  envFilePath,
+  expandPath,
+  hint,
+  isInstalled,
+  loadConfig,
+  stateDir,
+  type Config,
+} from '../config/env.js';
 import type { AppContext } from '../context.js';
 import { MetaClient } from '../meta/client.js';
 import { silentLogger } from '../observability/logger.js';
@@ -410,12 +419,14 @@ program
         `autostart (${u.label}): ${!u.installed ? `missing (${hint('setup --only autostart')})` : u.enabled ? 'on' : `off (${hint('start')})`}`,
       );
     line(secretStoreAvailable() ? true : 'warn', `secrets kept in ${secretStoreName()}`);
-    line(
-      c.TUNNEL_MODE === 'named' ? true : 'warn',
-      c.TUNNEL_MODE === 'named'
-        ? 'named tunnel (stable URL)'
-        : `tunnel mode ${c.TUNNEL_MODE}: the URL changes on restart. A named tunnel is steadier once you have a domain (${hint('setup --only tunnel')})`,
-    );
+    // Only the Cloud API needs a public webhook URL; linked device and Telegram connect outward.
+    if (c.CHANNEL === 'whatsapp')
+      line(
+        c.TUNNEL_MODE === 'named' ? true : 'warn',
+        c.TUNNEL_MODE === 'named'
+          ? 'named tunnel (stable URL)'
+          : `tunnel mode ${c.TUNNEL_MODE}: the URL changes on restart. A named tunnel is steadier once you have a domain (${hint('setup --only tunnel')})`,
+      );
 
     if (c.CHANNEL === 'whatsapp') {
       const client = new MetaClient({
