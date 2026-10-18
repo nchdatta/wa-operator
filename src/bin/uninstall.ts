@@ -10,7 +10,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { parse as parseDotenv } from 'dotenv';
-import { appRoot } from '../config/env.js';
+import { appRoot, envFilePath, hint, isInstalled, stateDir } from '../config/env.js';
 import { MetaClient } from '../meta/client.js';
 import { silentLogger } from '../observability/logger.js';
 import { removeAutostart } from '../platform/autostart.js';
@@ -21,7 +21,7 @@ import { purgePaths } from '../shared/purge.js';
 process.noDeprecation = true;
 
 const ROOT = appRoot();
-const ENV_PATH = path.join(ROOT, '.env');
+const ENV_PATH = envFilePath();
 const TUNNEL = 'wa-operator';
 const args = process.argv.slice(2);
 const yes = args.includes('--yes') || args.includes('-y');
@@ -88,7 +88,7 @@ function removeSecrets(): void {
 
 function purgeFiles(): void {
   log.step('Delete local files');
-  for (const full of purgePaths(ROOT)) {
+  for (const full of purgePaths(stateDir())) {
     const p = path.basename(full);
     if (!fs.existsSync(full)) continue;
     try {
@@ -102,7 +102,7 @@ function purgeFiles(): void {
 
 async function main(): Promise<void> {
   if (args.includes('--help') || args.includes('-h')) {
-    console.log('Usage: npm run uninstall -- [--purge] [--yes] [--keep-secrets]');
+    console.log(`Usage: ${hint('uninstall [--purge] [--yes] [--keep-secrets]')}`);
     return;
   }
   console.log(`WhatsApp Operator Mode uninstall (${ROOT})`);
@@ -127,7 +127,7 @@ async function main(): Promise<void> {
   }
   console.log('  - Meta: the PIN Flow and the reply template stay in WhatsApp Manager');
   console.log(
-    `  - .env kept${purge ? '' : ' with data/'}. Reinstall with: ${process.platform === 'win32' ? 'install.cmd' : './install.sh'}`,
+    `  - .env kept${purge ? '' : ' with data/'}. Reinstall with: ${isInstalled() ? 'the one-line installer' : process.platform === 'win32' ? 'install.cmd' : './install.sh'}`,
   );
 }
 

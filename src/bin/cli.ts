@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -8,7 +9,7 @@ import { parse as parseDotenv } from 'dotenv';
 import { eq } from 'drizzle-orm';
 import { recentAudit } from '../audit.js';
 import { BaileysChannel, baileysAuthDir } from '../channels/baileys.js';
-import { appRoot, ConfigError, expandPath, loadConfig, type Config } from '../config/env.js';
+import { ConfigError, envFilePath, expandPath, hint, isInstalled, loadConfig, stateDir, type Config } from '../config/env.js';
 import type { AppContext } from '../context.js';
 import { MetaClient } from '../meta/client.js';
 import { silentLogger } from '../observability/logger.js';
@@ -19,6 +20,7 @@ import { openDb } from '../persistence/db.js';
 import { toolTiers } from '../persistence/schema.js';
 import { ensureDataKey } from '../security/data-key.js';
 import { autostartStatus } from '../platform/autostart.js';
+import { currentVersion, handOver, isNewer, latestVersion } from '../platform/release.js';
 import {
   deleteSecret,
   readSecrets,
@@ -36,11 +38,11 @@ import { systemClock } from '../shared/clock.js';
  */
 
 function envFile(): { vars: Record<string, string>; baseDir: string } {
-  const envPath = path.resolve(process.env.DOTENV_CONFIG_PATH ?? '.env');
+  const envPath = envFilePath();
   const exists = fs.existsSync(envPath);
   return {
     vars: { ...(exists ? parseDotenv(fs.readFileSync(envPath)) : {}), ...(process.env as Record<string, string>) },
-    baseDir: exists ? path.dirname(envPath) : process.cwd(),
+    baseDir: path.dirname(envPath),
   };
 }
 
@@ -104,8 +106,55 @@ async function readHidden(prompt: string): Promise<string> {
   });
 }
 
+/**
+ * One command for everything: "wa-operator setup", "wa-operator start" and so on run the sibling
+ * scripts (setup, control, uninstall) with the same Node, so an installed copy needs nothing on PATH.
+ */
+const ROUTES: Record<string, [string, string[]]> = {
+  setup: ['setup', []],
+  start: ['control', ['start']],
+  stop: ['control', ['stop']],
+  restart: ['control', ['restart']],
+  running: ['control', ['status']],
+  'service-logs': ['control', ['logs']],
+};
+function runSibling(name: string, args: string[]): number {
+  const self = fileURLToPath(import.meta.url);
+  const file = path.join(path.dirname(self), `${name}${path.extname(self)}`);
+  return spawnSync(process.execPath, [...process.execArgv, file, ...args], { stdio: 'inherit' }).status ?? 1;
+}
+const routed = ROUTES[process.argv[2] ?? ''];
+if (routed) process.exit(runSibling(routed[0], [...routed[1], ...process.argv.slice(3)]));
+
 const program = new Command();
-program.name('wa-operator').description('WhatsApp Operator Mode: PC-side controls').version('0.1.0');
+program.name('wa-operator').description('WhatsApp Operator Mode: PC-side controls').version(currentVersion());
+for (const [name, [script, args]] of Object.entries(ROUTES))
+  program.command(name).description(`(runs ${script}${args.length ? ` ${args.join(' ')}` : ''})`);
+
+program
+  .command('update')
+  .description('Download and install the newest version. Your settings and data are kept.')
+  .option('--check', 'only say whether an update is available')
+  .action(async (o: { check?: boolean }) => {
+    if (!isInstalled()) throw new Error('this is a git checkout: update it with git pull, then npm run restart');
+    const cur = currentVersion();
+    const latest = await latestVersion();
+    if (!isNewer(latest, cur)) return void console.log(`Up to date (version ${cur}).`);
+    console.log(`Version ${latest} is available (you have ${cur}).`);
+    if (o.check) return;
+    console.log('Updating in a new window. Operator Mode restarts by itself when it is done.');
+    handOver('update');
+  });
+
+program
+  .command('uninstall')
+  .description('Remove WA Operator from this PC. Add --purge to delete its data too.')
+  .allowUnknownOption()
+  .action(() => {
+    const code = runSibling('uninstall', process.argv.slice(3));
+    if (code !== 0 || !isInstalled()) process.exit(code);
+    handOver('uninstall');
+  });
 
 program
   .command('set-pin')
@@ -261,7 +310,7 @@ program
     if (!src) throw new Error('claude_desktop_config.json not found (classic or Microsoft Store install)');
     const desktop = JSON.parse(fs.readFileSync(src, 'utf8')) as { mcpServers?: Record<string, unknown> };
     const servers = desktop.mcpServers ?? {};
-    const out = path.join(appRoot(), 'config', 'mcp.json');
+    const out = path.join(stateDir(), 'config', 'mcp.json');
     fs.mkdirSync(path.dirname(out), { recursive: true });
     fs.writeFileSync(out, JSON.stringify({ mcpServers: servers }, null, 2));
     console.log(
@@ -358,14 +407,14 @@ program
     for (const u of autostartStatus(c.TUNNEL_MODE === 'named'))
       line(
         u.enabled ? true : 'warn',
-        `autostart (${u.label}): ${!u.installed ? 'missing (npm run setup -- --only autostart)' : u.enabled ? 'on' : 'off (npm start)'}`,
+        `autostart (${u.label}): ${!u.installed ? `missing (${hint('setup --only autostart')})` : u.enabled ? 'on' : `off (${hint('start')})`}`,
       );
     line(secretStoreAvailable() ? true : 'warn', `secrets kept in ${secretStoreName()}`);
     line(
       c.TUNNEL_MODE === 'named' ? true : 'warn',
       c.TUNNEL_MODE === 'named'
         ? 'named tunnel (stable URL)'
-        : `tunnel mode ${c.TUNNEL_MODE}: the URL changes on restart. A named tunnel is steadier once you have a domain (npm run setup -- --only tunnel)`,
+        : `tunnel mode ${c.TUNNEL_MODE}: the URL changes on restart. A named tunnel is steadier once you have a domain (${hint('setup --only tunnel')})`,
     );
 
     if (c.CHANNEL === 'whatsapp') {
@@ -474,7 +523,7 @@ program
     // Let the first creds sync finish before closing.
     await new Promise((r) => setTimeout(r, 5000));
     ch.stop();
-    console.log(`✔ Linked. Session saved in ${dir} (keep it private). Start the service: npm start`);
+    console.log(`✔ Linked. Session saved in ${dir} (keep it private). Start the service: ${hint('start')}`);
     process.exit(0);
   });
 
@@ -492,5 +541,6 @@ ${body}`;
 
 program.parseAsync().catch((e: unknown) => {
   console.error(`Error: ${e instanceof Error ? e.message : String(e)}`);
-  process.exit(1);
+  // exitCode, not exit(): exiting while a fetch is closing trips a libuv assertion on Windows.
+  process.exitCode = 1;
 });

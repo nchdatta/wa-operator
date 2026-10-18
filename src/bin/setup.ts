@@ -6,20 +6,24 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { parse as parseDotenv } from 'dotenv';
-import { appRoot, CHANNEL_ALIASES } from '../config/env.js';
+import { appRoot, CHANNEL_ALIASES, envFilePath, isInstalled, stateDir } from '../config/env.js';
 import { MetaClient } from '../meta/client.js';
 import { silentLogger } from '../observability/logger.js';
+import { findClaude } from '../platform/claude-bin.js';
 import { installAutostart, TUNNEL_NAME } from '../platform/autostart.js';
 import { installVoice } from '../platform/whisper-install.js';
 import { readSecrets, SECRET_NAMES, secretStoreName, writeSecret, type SecretName } from '../security/secrets.js';
 import { ask, askHidden, confirm } from '../shared/prompt.js';
 
 /**
- * One-shot setup wizard for Windows, macOS and Linux. Run it at the business PC as the normal user
- * (not admin or root):
- *   npm run setup                    every step
- *   npm run setup -- --only meta     just some steps (comma separated)
- *   npm run setup -- --skip watcher  everything except some steps
+ * Setup wizard for Windows, macOS and Linux. Run it at the business PC as the normal user
+ * (not admin or root). "wa-operator setup" in an installed copy, "npm run setup --" in a git checkout:
+ *   setup                    installed copy: the quick setup (basics, Claude login, link WhatsApp, PIN, start)
+ *                            git checkout: every step, as always
+ *   setup --quick            the quick setup, anywhere
+ *   setup --advanced         every step (Cloud API, voice, browser, tunnel, autologon…), anywhere
+ *   setup --only meta        just some steps (comma separated)
+ *   setup --skip watcher     everything except some steps
  * Every step is safe to re-run. Only BIOS "power on after power loss" is left by hand.
  */
 
@@ -27,7 +31,13 @@ import { ask, askHidden, confirm } from '../shared/prompt.js';
 process.noDeprecation = true;
 
 const ROOT = appRoot();
-const ENV_PATH = path.join(ROOT, '.env');
+const ENV_PATH = envFilePath();
+const STATE = stateDir();
+const INSTALLED = isInstalled();
+const SETUP = INSTALLED ? 'wa-operator setup' : 'npm run setup --';
+const RESTART = INSTALLED ? 'wa-operator restart' : 'npm run restart';
+const CLI = INSTALLED ? 'wa-operator' : 'npm run cli --';
+const LOG_FILE = path.join(STATE, 'logs', 'operator.log');
 const STEPS = [
   'build',
   'env',
@@ -46,6 +56,8 @@ const STEPS = [
   'watcher',
 ] as const;
 type Step = (typeof STEPS)[number];
+/** The quick setup: the linked-device channel, so no Meta account, tunnel or domain is needed. */
+const QUICK: Step[] = ['env', 'claude', 'baileys', 'pin', 'autostart'];
 const GRAPH = 'https://graph.facebook.com/v24.0';
 const TUNNEL = TUNNEL_NAME;
 const WIN = process.platform === 'win32';
@@ -136,8 +148,12 @@ async function waitFor(url: string, seconds: number): Promise<boolean> {
 
 // ---- steps --------------------------------------------------------------------------------------------
 
+/** True in the quick setup: fewer questions, sensible defaults. */
+let quick = false;
+
 const steps: Record<Step, () => Promise<void>> = {
   async build() {
+    if (INSTALLED) return; // the download is already built
     log.step('Install and build');
     if (!fs.existsSync(path.join(ROOT, 'node_modules'))) run('npm', ['install']);
     if (!run('npm', ['run', 'build']).ok) throw new Error('build failed');
@@ -145,9 +161,31 @@ const steps: Record<Step, () => Promise<void>> = {
   },
 
   async env() {
-    log.step('Basic settings (.env)');
+    log.step('About the business');
     const e = readEnv();
     const home = os.homedir();
+    const docs = path.join(home, 'Documents');
+    if (quick) {
+      setEnv({
+        CHANNEL: e.CHANNEL ?? 'linked',
+        OPERATOR_WA_ID: (
+          await ask('Your personal WhatsApp number, with country code (e.g. 8801712345678)', e.OPERATOR_WA_ID)
+        ).replace(/D/g, ''),
+        OPERATOR_ROOTS: e.OPERATOR_ROOTS && !e.OPERATOR_ROOTS.includes('%') ? e.OPERATOR_ROOTS : docs,
+        BUSINESS_NAME: await ask('Business name', e.BUSINESS_NAME === 'Rahim Fashion' ? undefined : e.BUSINESS_NAME),
+        BUSINESS_DESCRIPTION: await ask(
+          'What the business does, in a few words (e.g. clothing shop in Mirpur)',
+          e.BUSINESS_DESCRIPTION === 'clothing shop in Mirpur, Dhaka' ? undefined : e.BUSINESS_DESCRIPTION,
+        ),
+        BUSINESS_TIMEZONE: await ask(
+          'Time zone',
+          e.BUSINESS_TIMEZONE ?? Intl.DateTimeFormat().resolvedOptions().timeZone ?? 'Asia/Dhaka',
+        ),
+      });
+      for (const r of readEnv().OPERATOR_ROOTS!.split(',')) fs.mkdirSync(r.trim(), { recursive: true });
+      log.ok(`saved ${ENV_PATH}`);
+      return;
+    }
     setEnv({
       CHANNEL: await ask(
         'How the owner talks to the PC: linked (spare WhatsApp number as a linked device, easiest), cloud (WhatsApp Business Cloud API from Meta) or telegram',
@@ -187,11 +225,18 @@ const steps: Record<Step, () => Promise<void>> = {
     // claude.ai connectors (Gmail, Calendar, Drive).
     log.step('Claude subscription login');
     const creds = path.join(os.homedir(), '.claude', '.credentials.json');
-    if (!fs.existsSync(creds)) {
-      console.log('  Not logged in. In another terminal run:  claude   then type  /login  and finish in the browser.');
-      while (!fs.existsSync(creds) && (await confirm('Logged in now?', true)) === true && !fs.existsSync(creds))
-        log.warn(`still no login at ${creds}`);
-      if (!fs.existsSync(creds)) throw new Error('Claude login missing; re-run: npm run setup -- --only claude');
+    const bin = findClaude() ?? '';
+    const loggedIn = () =>
+      fs.existsSync(creds) || (bin !== '' && run(bin, ['auth', 'status'], { quiet: true }).out.includes('"loggedIn": true'));
+    if (!loggedIn() && bin) {
+      console.log('  A browser opens: sign in with the Claude account (Pro or Max) this PC should use.');
+      run(bin, ['auth', 'login']);
+    }
+    if (!loggedIn()) {
+      console.log('  Not logged in yet. Finish the sign-in in the browser, or run:  claude auth login');
+      while (!loggedIn() && (await confirm('Logged in now?', true)) === true && !loggedIn())
+        log.warn('still not logged in');
+      if (!loggedIn()) throw new Error(`Claude login missing; re-run: ${SETUP} --only claude`);
     }
     log.ok('using your Claude Code login (connectors like Gmail included)');
   },
@@ -255,8 +300,9 @@ const steps: Record<Step, () => Promise<void>> = {
     if (channel() !== 'baileys') return;
     log.step('Link the Operator WhatsApp number (Baileys)');
     log.warn('Unofficial WhatsApp Web link: use a spare number, never the business number. It can be banned.');
-    if (!run('node', ['dist/bin/cli.js', 'baileys', 'link']).ok)
-      throw new Error('not linked; re-run: npm run setup -- --only baileys');
+    console.log('  On the spare phone: WhatsApp → Settings → Linked devices → Link a device, then scan the code below.');
+    if (!run(process.execPath, [path.join(ROOT, 'dist', 'bin', 'cli.js'), 'baileys', 'link']).ok)
+      throw new Error(`not linked; re-run: ${SETUP} --only baileys`);
     log.ok('linked');
   },
 
@@ -330,7 +376,7 @@ const steps: Record<Step, () => Promise<void>> = {
 
   async pin() {
     log.step('Owner PIN');
-    run('node', [path.join(ROOT, 'dist', 'bin', 'cli.js'), 'set-pin']);
+    run(process.execPath, [path.join(ROOT, 'dist', 'bin', 'cli.js'), 'set-pin']);
   },
 
   async voice() {
@@ -346,9 +392,9 @@ const steps: Record<Step, () => Promise<void>> = {
     )
       return;
     const lang = await ask('Spoken language: auto (any), bn (Bangla) or en', e.WHISPER_LANG ?? 'auto');
-    const t = await installVoice(ROOT, 'small', (s) => log.ok(s));
+    const t = await installVoice(STATE, 'small', (s) => log.ok(s));
     setEnv({ WHISPER_BIN: t.bin, WHISPER_MODEL: t.model, FFMPEG_BIN: t.ffmpeg, WHISPER_LANG: lang });
-    log.ok('voice notes on; the service starts whisper itself (restart it: npm run restart)');
+    log.ok(`voice notes on; the service starts whisper itself (restart it: ${RESTART})`);
   },
 
   async browser() {
@@ -376,7 +422,7 @@ const steps: Record<Step, () => Promise<void>> = {
     console.log(`  If Chrome did not open, open this page yourself: ${store}`);
     await ask('Press Enter when the extension is added and signed in', '');
     setEnv({ OPERATOR_BROWSER: 'true' });
-    log.ok('browser control on (restart the service: npm run restart). Keep Chrome open for it to work.');
+    log.ok(`browser control on (restart the service: ${RESTART}). Keep Chrome open for it to work.`);
   },
 
   async tunnel() {
@@ -405,12 +451,12 @@ const steps: Record<Step, () => Promise<void>> = {
         run('brew', ['install', 'cloudflared']);
       } else {
         throw new Error(
-          'cloudflared is not installed. Install it (https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/), then re-run: npm run setup -- --only tunnel',
+          `cloudflared is not installed. Install it (https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/), then re-run: ${SETUP} --only tunnel`,
         );
       }
       if (!has('cloudflared'))
         throw new Error(
-          'cloudflared not found after install. Open a new terminal and re-run: npm run setup -- --only tunnel',
+          `cloudflared not found after install. Open a new terminal and re-run: ${SETUP} --only tunnel`,
         );
     }
     const bin = which('cloudflared');
@@ -470,7 +516,7 @@ const steps: Record<Step, () => Promise<void>> = {
     for (const n of notes) log.ok(n);
     const port = readEnv().WEBHOOK_PORT ?? '3100';
     if (await waitFor(`http://127.0.0.1:${port}/health/live`, 30)) log.ok('service is up');
-    else log.warn(`service did not answer yet; check ${path.join(ROOT, 'logs')}`);
+    else log.warn(`service did not answer yet; check ${LOG_FILE}`);
   },
 
   async webhook() {
@@ -485,8 +531,8 @@ const steps: Record<Step, () => Promise<void>> = {
     if (e.TUNNEL_MODE === 'quick') {
       console.log('  waiting for the quick tunnel URL…');
       for (let i = 0; i < 60 && !base; i++) {
-        const log2 = fs.existsSync(path.join(ROOT, 'logs', 'operator.log'))
-          ? fs.readFileSync(path.join(ROOT, 'logs', 'operator.log'), 'utf8')
+        const log2 = fs.existsSync(LOG_FILE)
+          ? fs.readFileSync(LOG_FILE, 'utf8')
           : '';
         base = [...log2.matchAll(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/g)].at(-1)?.[0] ?? '';
         if (!base) await new Promise((r) => setTimeout(r, 1000));
@@ -494,7 +540,7 @@ const steps: Record<Step, () => Promise<void>> = {
       if (!base) throw new Error('no quick tunnel URL yet; check logs/operator.log');
     }
     if (!(await waitFor(`${base}/health/live`, 90)))
-      throw new Error(`${base} is not reachable yet. Re-run: npm run setup -- --only webhook`);
+      throw new Error(`${base} is not reachable yet. Re-run: ${SETUP} --only webhook`);
     await meta().request({
       method: 'POST',
       path: `/${e.WHATSAPP_BUSINESS_ACCOUNT_ID}/subscribed_apps`,
@@ -589,7 +635,11 @@ async function main(): Promise<void> {
   };
   const only = arg('--only');
   const skip = arg('--skip');
-  const todo = STEPS.filter((s) => (only.length ? only.includes(s) : true) && !skip.includes(s));
+  const flag = (f: string) => process.argv.includes(f);
+  const wantQuick = flag('--quick') || (INSTALLED && !flag('--advanced'));
+  const base: readonly Step[] = only.length || !wantQuick ? STEPS : QUICK;
+  const todo = base.filter((s) => (only.length ? only.includes(s) : true) && !skip.includes(s));
+  quick = base === QUICK;
   Object.assign(secrets, readSecrets(SECRET_NAMES));
 
   const failed: string[] = [];
@@ -603,14 +653,15 @@ async function main(): Promise<void> {
     }
   }
   console.log('\n────────────────────────────');
-  if (failed.length) console.log(`Re-run the failed steps: npm run setup -- --only ${failed.join(',')}`);
+  if (failed.length) console.log(`Re-run the failed steps: ${SETUP} --only ${failed.join(',')}`);
   else console.log("Done. Message the operator number from the owner's phone; it will ask for the PIN.");
   console.log(
     MAC
       ? 'By hand (once): System Settings → Energy → "Start up automatically after a power failure".'
       : 'By hand (once): BIOS → "Restore on AC power loss" = Power On.',
   );
-  console.log('After the first message, review MCP tools: npm run cli -- tiers, then tiers accept.');
+  if (quick) console.log(`More options (voice notes, browser, Cloud API…): ${SETUP} --advanced`);
+  console.log(`After the first message, review MCP tools: ${CLI} tiers, then tiers accept.`);
 }
 
 void main().catch((e: unknown) => {

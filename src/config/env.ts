@@ -229,9 +229,9 @@ export function buildConfig(env: Record<string, string | undefined>, baseDir: st
  * from the system secret store: Credential Manager, Keychain or keyring (which win, so tokens never need to sit in `.env`).
  */
 export function loadConfig(opts: { secrets?: boolean } = {}): Config {
-  const envPath = path.resolve(process.env.DOTENV_CONFIG_PATH ?? '.env');
+  const envPath = envFilePath();
   const fileVars = fs.existsSync(envPath) ? parseDotenv(fs.readFileSync(envPath)) : {};
-  const baseDir = fs.existsSync(envPath) ? path.dirname(envPath) : process.cwd();
+  const baseDir = path.dirname(envPath);
   const secrets = opts.secrets === false ? {} : readSecrets(SECRET_NAMES);
   return buildConfig({ ...fileVars, ...process.env, ...secrets }, baseDir, appRoot());
 }
@@ -239,4 +239,40 @@ export function loadConfig(opts: { secrets?: boolean } = {}): Config {
 /** The folder holding package.json, from both src/ (tsx) and dist/ (built). */
 export function appRoot(): string {
   return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+}
+
+/** True when running from a downloaded release (the installer writes this marker), not a git checkout. */
+export function isInstalled(): boolean {
+  return fs.existsSync(path.join(appRoot(), '.installed'));
+}
+
+/**
+ * Where this PC's own files live: .env, data/, logs/, tools/, config/mcp.json.
+ * Installed: %APPDATA%wa-operator, ~/Library/Application Support/wa-operator or ~/.config/wa-operator,
+ * so an update can replace the app folder without touching them. Git checkout: the repo folder, as before.
+ */
+export function stateDir(): string {
+  if (process.env.WAOP_STATE_DIR) return path.resolve(process.env.WAOP_STATE_DIR);
+  if (!isInstalled()) return appRoot();
+  const home = os.homedir();
+  const base =
+    process.platform === 'win32'
+      ? (process.env.APPDATA ?? path.join(home, 'AppData', 'Roaming'))
+      : process.platform === 'darwin'
+        ? path.join(home, 'Library', 'Application Support')
+        : (process.env.XDG_CONFIG_HOME ?? path.join(home, '.config'));
+  return path.join(base, 'wa-operator');
+}
+
+/** The .env in use: DOTENV_CONFIG_PATH, or <stateDir>/.env. */
+export function envFilePath(): string {
+  return path.resolve(process.env.DOTENV_CONFIG_PATH ?? path.join(stateDir(), '.env'));
+}
+
+/** How to type a command here: "wa-operator setup --only x" installed, "npm run setup -- --only x" in a checkout. */
+export function hint(cmd: string): string {
+  if (isInstalled()) return `wa-operator ${cmd}`;
+  const [name, ...rest] = cmd.split(' ');
+  if (name === 'start') return 'npm start';
+  return `npm run ${name}${rest.length ? ` -- ${rest.join(' ')}` : ''}`;
 }

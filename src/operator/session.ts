@@ -26,6 +26,7 @@ import { errMsg } from '../shared/errors.js';
 import { dayKey, type Gate } from './gate.js';
 import type { OwnerQuestions } from './output.js';
 import { createWhatsAppOutServer } from './output.js';
+import { findClaude } from '../platform/claude-bin.js';
 import { DENY_NAMES, defaultDenyPaths, realPath, type PathPolicy } from './paths.js';
 import { operatorRules } from './scope.js';
 import { TaintTracker } from './taint.js';
@@ -169,7 +170,7 @@ function readMcpFile(file: string): Record<string, McpServerConfig> {
  */
 export function loadImportedMcp(ctx: AppContext): { servers: Record<string, McpServerConfig>; skipped: string[] } {
   const desktop = Object.assign({}, ...desktopConfigPaths().map(readMcpFile)) as Record<string, McpServerConfig>;
-  const all = { ...desktop, ...readMcpFile(path.join(ctx.config.appDir, 'config', 'mcp.json')) };
+  const all = { ...desktop, ...readMcpFile(path.join(ctx.config.baseDir, 'config', 'mcp.json')) };
   const allow = ctx.config.OPERATOR_MCP_ALLOW.map((s) => s.toLowerCase());
   const servers: Record<string, McpServerConfig> = {};
   const skipped: string[] = [];
@@ -196,9 +197,13 @@ export function missingFile(cfg: McpServerConfig): string | null {
 
 export function buildPathPolicy(ctx: AppContext): PathPolicy {
   const c = ctx.config;
+  const roots = [...c.roots, c.inbox, c.outbox].map((r) => realPath(r, c.home));
+  // The settings folder (%APPDATA%wa-operator when installed) is blocked too, unless a work folder is inside it.
+  const inside = (p: string, dir: string) => !path.relative(dir, p).startsWith('..') && !path.isAbsolute(path.relative(dir, p));
+  const state = roots.some((r) => inside(r, c.baseDir)) ? [] : [c.baseDir];
   return {
-    roots: [...c.roots, c.inbox, c.outbox].map((r) => realPath(r, c.home)),
-    denyPaths: defaultDenyPaths(c.appDir, c.dataDir, c.OPERATOR_EXTRA_DENY),
+    roots,
+    denyPaths: defaultDenyPaths(c.appDir, c.dataDir, [...state, ...c.OPERATOR_EXTRA_DENY]),
     denyNames: DENY_NAMES,
   };
 }
@@ -396,7 +401,9 @@ export class OperatorSession {
     const imported = loadImportedMcp(this.ctx);
     this.failedServers = imported.skipped;
     if (imported.skipped.length) this.ctx.logger.warn({ skipped: imported.skipped }, 'MCP servers skipped');
+    const claude = findClaude();
     return {
+      ...(claude ? { pathToClaudeCodeExecutable: claude } : {}),
       model: c.OPERATOR_MODEL,
       cwd: c.home,
       additionalDirectories: [...c.roots, c.inbox, c.outbox].filter((r) => r !== c.home),

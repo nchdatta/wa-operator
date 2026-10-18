@@ -1,0 +1,54 @@
+# Tag a version (git tag v0.2.0 && git push --tags) to build every platform and publish a release in
+# this repo. Clients download it through the Worker in scripts/downloads (the repo is private).
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - { os: windows-latest, target: win-x64, ext: zip }
+          - { os: ubuntu-latest, target: linux-x64, ext: tar.gz }
+          - { os: ubuntu-24.04-arm, target: linux-arm64, ext: tar.gz }
+          - { os: macos-latest, target: darwin-arm64, ext: tar.gz }
+          - { os: macos-13, target: darwin-x64, ext: tar.gz }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Tag matches package.json
+        shell: bash
+        run: test "v$(node -p "require('./package.json').version")" = "${GITHUB_REF_NAME}"
+      - run: npm ci
+      - run: npx vitest run
+      - run: node scripts/package.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: release/wa-operator-${{ matrix.target }}.${{ matrix.ext }}
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+      - name: Checksums
+        run: cp scripts/install.ps1 scripts/install.sh out/ && cd out && sha256sum * > SHA256SUMS.txt
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: WA Operator ${{ github.ref_name }}
+          files: out/*

@@ -11,14 +11,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { parse as parseDotenv } from 'dotenv';
-import { appRoot } from '../config/env.js';
+import { appRoot, envFilePath, hint, stateDir } from '../config/env.js';
 import { autostartStatus, startAll, stopAll } from '../platform/autostart.js';
 
 process.noDeprecation = true;
 
 const ROOT = appRoot();
 const env = (() => {
-  const f = path.join(ROOT, '.env');
+  const f = envFilePath();
   return fs.existsSync(f) ? parseDotenv(fs.readFileSync(f)) : {};
 })();
 const port = Number(env.WEBHOOK_PORT ?? 3100);
@@ -26,7 +26,7 @@ const port = Number(env.WEBHOOK_PORT ?? 3100);
 function stop(): void {
   const r = stopAll(ROOT, port);
   console.log(
-    `stopped${r.units.length ? `: ${r.units.join(', ')}` : ''}; ended ${r.killed} leftover program(s). Autostart is off until npm start.`,
+    `stopped${r.units.length ? `: ${r.units.join(', ')}` : ''}; ended ${r.killed} leftover program(s). Autostart is off until ${hint('start')}.`,
   );
 }
 
@@ -38,7 +38,7 @@ function start(): void {
 async function status(): Promise<void> {
   for (const u of autostartStatus(env.TUNNEL_MODE === 'named'))
     console.log(
-      `${u.label}: ${!u.installed ? 'not installed (npm run setup -- --only autostart)' : u.enabled ? 'autostart on' : 'autostart off (npm start)'}`,
+      `${u.label}: ${!u.installed ? `not installed (${hint('setup --only autostart')})` : u.enabled ? 'autostart on' : `autostart off (${hint('start')})`}`,
     );
   try {
     const res = await fetch(`http://127.0.0.1:${port}/health/live`, { signal: AbortSignal.timeout(3000) });
@@ -49,7 +49,7 @@ async function status(): Promise<void> {
 }
 
 function logs(): void {
-  const file = path.join(ROOT, 'logs', 'operator.log');
+  const file = path.join(stateDir(), 'logs', 'operator.log');
   if (!fs.existsSync(file)) return void console.log(`no log yet at ${file}`);
   const text = fs.readFileSync(file, 'utf8');
   process.stdout.write(`${text.split('\n').slice(-31).join('\n')}`);
