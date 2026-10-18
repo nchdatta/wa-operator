@@ -16,7 +16,7 @@ jobs:
           - { os: ubuntu-latest, target: linux-x64, ext: tar.gz }
           - { os: ubuntu-24.04-arm, target: linux-arm64, ext: tar.gz }
           - { os: macos-latest, target: darwin-arm64, ext: tar.gz }
-          - { os: macos-13, target: darwin-x64, ext: tar.gz }
+          - { os: macos-15-intel, target: darwin-x64, ext: tar.gz }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
