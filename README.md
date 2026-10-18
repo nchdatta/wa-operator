@@ -55,7 +55,7 @@ Everything that loosens security happens only at the PC, never from WhatsApp: se
 
 ## Install
 
-One line, with no git, Node or npm needed. It installs WA Operator and Claude Code (from Anthropic's official installer), then runs the quick setup: business details, Claude login, link the WhatsApp number by QR, PIN, start.
+One line, with no git, Node or npm needed. It installs WA Operator and Claude Code (from Anthropic's official installer), then runs the full setup, the same steps as a git checkout. Use `wa-operator setup --quick` for just the basics.
 
 Windows (PowerShell):
 ```
@@ -66,7 +66,7 @@ macOS / Linux:
 curl -fsSL https://github.com/nchdatta/wa-operator/releases/latest/download/install.sh | bash
 ```
 
-Then, in any terminal: `wa-operator setup [--advanced]`, `start`, `stop`, `restart`, `running`, `update`, `uninstall`, plus the PC commands above (`wa-operator tiers`, `wa-operator set-pin`…). The app lives in `%LOCALAPPDATA%\Programs\WA Operator` or `~/.local/share/wa-operator`. Settings and data live in `%APPDATA%\wa-operator`, `~/Library/Application Support/wa-operator` or `~/.config/wa-operator`, so updates keep them.
+Then, in any terminal: `wa-operator setup [--quick] [--only <steps>]`, `start`, `stop`, `restart`, `running`, `update`, `uninstall`, plus the PC commands above (`wa-operator tiers`, `wa-operator set-pin`…). The app lives in `%LOCALAPPDATA%\Programs\WA Operator` or `~/.local/share/wa-operator`. Settings and data live in `%APPDATA%\wa-operator`, `~/Library/Application Support/wa-operator` or `~/.config/wa-operator`, so updates keep them.
 
 Releasing: bump `version` in package.json, then `git tag v<version> && git push --tags`. `.github/workflows/release.yml` builds every platform (`node scripts/package.mjs`) and publishes a release in this repo.
 

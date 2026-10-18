@@ -18,10 +18,8 @@ import { ask, askHidden, confirm } from '../shared/prompt.js';
 /**
  * Setup wizard for Windows, macOS and Linux. Run it at the business PC as the normal user
  * (not admin or root). "wa-operator setup" in an installed copy, "npm run setup --" in a git checkout:
- *   setup                    installed copy: the quick setup (basics, Claude login, link WhatsApp, PIN, start)
- *                            git checkout: every step, as always
- *   setup --quick            the quick setup, anywhere
- *   setup --advanced         every step (Cloud API, voice, browser, tunnel, autologon…), anywhere
+ *   setup                    every step, the same for an installed copy and a git checkout
+ *   setup --quick            only the basics: business details, Claude login, link WhatsApp, PIN, start
  *   setup --only meta        just some steps (comma separated)
  *   setup --skip watcher     everything except some steps
  * Every step is safe to re-run. Only BIOS "power on after power loss" is left by hand.
@@ -636,8 +634,7 @@ async function main(): Promise<void> {
   const only = arg('--only');
   const skip = arg('--skip');
   const flag = (f: string) => process.argv.includes(f);
-  const wantQuick = flag('--quick') || (INSTALLED && !flag('--advanced'));
-  const base: readonly Step[] = only.length || !wantQuick ? STEPS : QUICK;
+  const base: readonly Step[] = only.length || !flag('--quick') ? STEPS : QUICK;
   const todo = base.filter((s) => (only.length ? only.includes(s) : true) && !skip.includes(s));
   quick = base === QUICK;
   Object.assign(secrets, readSecrets(SECRET_NAMES));
@@ -660,7 +657,7 @@ async function main(): Promise<void> {
       ? 'By hand (once): System Settings → Energy → "Start up automatically after a power failure".'
       : 'By hand (once): BIOS → "Restore on AC power loss" = Power On.',
   );
-  if (quick) console.log(`More options (voice notes, browser, Cloud API…): ${SETUP} --advanced`);
+  if (quick) console.log(`More options (voice notes, browser, Cloud API…): ${SETUP}`);
   console.log(`After the first message, review MCP tools: ${CLI} tiers, then tiers accept.`);
 }
 

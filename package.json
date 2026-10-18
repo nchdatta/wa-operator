@@ -1,6 +1,6 @@
 {
   "name": "wa-operator",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "WhatsApp Operator Mode: a human-in-the-loop AI agent; the business owner drives Claude on the shop PC from one dedicated WhatsApp number",
   "type": "module",
