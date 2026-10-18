@@ -13,6 +13,7 @@ import { findClaude } from '../platform/claude-bin.js';
 import { installAutostart, TUNNEL_NAME } from '../platform/autostart.js';
 import { installVoice } from '../platform/whisper-install.js';
 import { readSecrets, SECRET_NAMES, secretStoreName, writeSecret, type SecretName } from '../security/secrets.js';
+import { normalizeWaId, setEnvText } from '../shared/dotenv-edit.js';
 import { ask, askHidden, confirm } from '../shared/prompt.js';
 
 /**
@@ -84,12 +85,16 @@ function setEnv(values: Record<string, string>): void {
   const src = fs.existsSync(ENV_PATH)
     ? fs.readFileSync(ENV_PATH, 'utf8')
     : fs.readFileSync(path.join(ROOT, '.env.example'), 'utf8');
-  let out = src;
-  for (const [k, v] of Object.entries(values)) {
-    const re = new RegExp(`^#?\\s*${k}=.*$`, 'm');
-    out = re.test(out) ? out.replace(re, `${k}=${v}`) : `${out.trimEnd()}\n${k}=${v}\n`;
+  fs.writeFileSync(ENV_PATH, setEnvText(src, values));
+}
+
+/** Ask until the number has a country code (01… is taken as Bangladesh). */
+async function askWaId(prompt: string, current?: string): Promise<string> {
+  for (;;) {
+    const n = normalizeWaId(await ask(prompt, current === '8801700000000' ? undefined : current));
+    if (n) return n;
+    log.warn('Type the number with the country code, e.g. 8801712345678 (Bangladesh) or 447700900123 (UK).');
   }
-  fs.writeFileSync(ENV_PATH, out);
 }
 
 function run(cmd: string, args: string[], opts: { input?: string; quiet?: boolean } = {}) {
@@ -166,9 +171,10 @@ const steps: Record<Step, () => Promise<void>> = {
     if (quick) {
       setEnv({
         CHANNEL: e.CHANNEL ?? 'linked',
-        OPERATOR_WA_ID: (
-          await ask('Your personal WhatsApp number, with country code (e.g. 8801712345678)', e.OPERATOR_WA_ID)
-        ).replace(/D/g, ''),
+        OPERATOR_WA_ID: await askWaId(
+          'Your personal WhatsApp number, with country code (e.g. 8801712345678)',
+          e.OPERATOR_WA_ID,
+        ),
         OPERATOR_ROOTS: e.OPERATOR_ROOTS && !e.OPERATOR_ROOTS.includes('%') ? e.OPERATOR_ROOTS : docs,
         BUSINESS_NAME: await ask('Business name', e.BUSINESS_NAME === 'Rahim Fashion' ? undefined : e.BUSINESS_NAME),
         BUSINESS_DESCRIPTION: await ask(
@@ -189,9 +195,7 @@ const steps: Record<Step, () => Promise<void>> = {
         'How the owner talks to the PC: linked (spare WhatsApp number as a linked device, easiest), cloud (WhatsApp Business Cloud API from Meta) or telegram',
         ({ baileys: 'linked', whatsapp: 'cloud' } as Record<string, string>)[e.CHANNEL ?? ''] ?? e.CHANNEL ?? 'linked',
       ),
-      OPERATOR_WA_ID: (
-        await ask("Owner's personal WhatsApp number (country code, digits only)", e.OPERATOR_WA_ID)
-      ).replace(/\D/g, ''),
+      OPERATOR_WA_ID: await askWaId("Owner's personal WhatsApp number (country code, digits only)", e.OPERATOR_WA_ID),
       OPERATOR_ROOTS: await ask(
         'Work folders Claude may change (comma separated)',
         e.OPERATOR_ROOTS?.includes('%')
@@ -225,7 +229,8 @@ const steps: Record<Step, () => Promise<void>> = {
     const creds = path.join(os.homedir(), '.claude', '.credentials.json');
     const bin = findClaude() ?? '';
     const loggedIn = () =>
-      fs.existsSync(creds) || (bin !== '' && run(bin, ['auth', 'status'], { quiet: true }).out.includes('"loggedIn": true'));
+      fs.existsSync(creds) ||
+      (bin !== '' && run(bin, ['auth', 'status'], { quiet: true }).out.includes('"loggedIn": true'));
     if (!loggedIn() && bin) {
       console.log('  A browser opens: sign in with the Claude account (Pro or Max) this PC should use.');
       run(bin, ['auth', 'login']);
@@ -298,7 +303,9 @@ const steps: Record<Step, () => Promise<void>> = {
     if (channel() !== 'baileys') return;
     log.step('Link the Operator WhatsApp number (Baileys)');
     log.warn('Unofficial WhatsApp Web link: use a spare number, never the business number. It can be banned.');
-    console.log('  On the spare phone: WhatsApp → Settings → Linked devices → Link a device, then scan the code below.');
+    console.log(
+      '  On the spare phone: WhatsApp → Settings → Linked devices → Link a device, then scan the code below.',
+    );
     if (!run(process.execPath, [path.join(ROOT, 'dist', 'bin', 'cli.js'), 'baileys', 'link']).ok)
       throw new Error(`not linked; re-run: ${SETUP} --only baileys`);
     log.ok('linked');
@@ -453,9 +460,7 @@ const steps: Record<Step, () => Promise<void>> = {
         );
       }
       if (!has('cloudflared'))
-        throw new Error(
-          `cloudflared not found after install. Open a new terminal and re-run: ${SETUP} --only tunnel`,
-        );
+        throw new Error(`cloudflared not found after install. Open a new terminal and re-run: ${SETUP} --only tunnel`);
     }
     const bin = which('cloudflared');
     if (mode === 'quick') {
@@ -529,9 +534,7 @@ const steps: Record<Step, () => Promise<void>> = {
     if (e.TUNNEL_MODE === 'quick') {
       console.log('  waiting for the quick tunnel URL…');
       for (let i = 0; i < 60 && !base; i++) {
-        const log2 = fs.existsSync(LOG_FILE)
-          ? fs.readFileSync(LOG_FILE, 'utf8')
-          : '';
+        const log2 = fs.existsSync(LOG_FILE) ? fs.readFileSync(LOG_FILE, 'utf8') : '';
         base = [...log2.matchAll(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/g)].at(-1)?.[0] ?? '';
         if (!base) await new Promise((r) => setTimeout(r, 1000));
       }
