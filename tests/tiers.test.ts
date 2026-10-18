@@ -219,7 +219,8 @@ describe('full trust', () => {
     expect(asks('mcp__whatsapp-out__send_file', { path: path.join(base, 'x.txt') })).toBe(false);
     expect(asks('mcp__claude_ai_Gmail__get_reply_count', {})).toBe(false);
   });
-  it('asks only for sends and confirm actions; not for work-folder deletes, installs, network, edits or schedules', () => {
+  // Uses Windows drive paths (D:\backup), which are relative on macOS and Linux.
+  it.runIf(process.platform === 'win32')('asks only for sends and confirm actions; not for work-folder deletes, installs, network, edits or schedules', () => {
     expect(asks('mcp__claude_ai_Gmail__send_message', {})).toBe(true);
     expect(asks('mcp__claude_ai_Gmail__trash_thread', {})).toBe(false);
     expect(asks('mcp__claude_ai_Gmail__create_draft', {})).toBe(false);

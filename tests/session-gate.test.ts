@@ -95,7 +95,8 @@ describe('PreToolUse gate', () => {
     expect(t.requests).toHaveLength(1);
   });
 
-  it('deletes outside work folders take one Yes, even in full trust', async () => {
+  // Windows drive paths (D:\backup) are relative on macOS and Linux.
+  it.runIf(process.platform === 'win32')('deletes outside work folders take one Yes, even in full trust', async () => {
     const t = setup();
     t.gate.setTrusted('full');
     await t.call('PowerShell', { command: 'Remove-Item D:\\backup_2024 -Recurse' });
